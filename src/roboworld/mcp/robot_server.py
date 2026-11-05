@@ -48,7 +48,8 @@ Tools:
 - do(skill, args): run a skill, e.g. do("look_around") or do("walk_to", {{"target": "red_ball"}}).
   It returns when the skill finishes, with ok and a message. Skills can fail: read the message and adapt.
 - run(program): run a custom RoboLang motion program (YAML) for anything the skills don't cover.
-- finish(summary): end the episode when you think the task is done, or that it's impossible.
+- finish(summary, success, answer): end the episode when you think the task is done, or that it's
+  impossible. Set success=true only if you checked. Give answer for tasks that ask a question.
 
 Coordinates are world metres. At the start x pointed forward and y to the left. Headings are degrees,
 counter-clockwise. You only know about objects you have seen. Success is judged by the simulator,
@@ -56,13 +57,13 @@ not by you."""
 
 
 def create_robot_server(robot: str, task: str, mode: str = "paused", seed: int = 0, run_id: str | None = None,
-                        brain: str | None = None) -> MCPServer:
+                        brain: str | None = None, record: bool = True) -> MCPServer:
     executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="episode")  # MuJoCo + GL on one thread
     holder: dict[str, Episode] = {}
 
     def episode() -> Episode:
         if "ep" not in holder:
-            holder["ep"] = Episode(robot, task, mode=mode, seed=seed, run_id=run_id, brain=brain)
+            holder["ep"] = Episode(robot, task, mode=mode, seed=seed, run_id=run_id, brain=brain, record=record)
         return holder["ep"]
 
     async def call(fn: Callable[[Episode], Any]) -> Any:
@@ -125,9 +126,10 @@ def create_robot_server(robot: str, task: str, mode: str = "paused", seed: int =
         return dump(await call(lambda ep: ep.status()))
 
     @server.tool()
-    async def finish(summary: str = "") -> str:
-        """End the episode. Say briefly what you did and whether you think the task is done."""
-        return dump(await call(lambda ep: ep.finish(summary)))
+    async def finish(summary: str = "", success: bool | None = None, answer: str | None = None) -> str:
+        """End the episode. summary: what you did. success: whether you believe the task is done
+        (only say true if you checked). answer: your answer, for tasks that ask a question."""
+        return dump(await call(lambda ep: ep.finish(summary, success, answer)))
 
     @server.prompt()
     def start() -> str:

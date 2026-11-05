@@ -38,6 +38,15 @@
     an LLM can act on. Don't raise for expected failures.
   - Tests that spawn the server use `ROBOWORLD_RUNS_DIR`, which
     `runner.server_env` passes through.
+- **Benchmark:**
+  - `bench.run_bench` swaps `paths.RUNS_DIR` to the bench folder while it runs,
+    and the robot servers get it through `ROBOWORLD_RUNS_DIR`.
+  - Skill and task changes should be checked against
+    `rw bench --brains baseline` for both robots before and after.
+- **Collision bits:**
+  - World geoms use contype 9 / conaffinity 5.
+  - Robot "body proxies" (visual meshes of bodies with no collision geometry) use
+    4 / 8, so they hit objects but not the floor or themselves.
 - **Library versions are newer than older docs:**
   - MCP 2.x: `from mcp.server.mcpserver import MCPServer` (FastMCP was renamed).
   - MuJoCo 3.17: lights use `type=mjLIGHT_DIRECTIONAL`.

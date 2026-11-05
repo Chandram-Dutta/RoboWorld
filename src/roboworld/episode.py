@@ -44,7 +44,7 @@ class Episode:
         if mode not in ("paused", "realtime"):
             raise ValueError("mode must be 'paused' or 'realtime'")
         self.task = load_task(task) if isinstance(task, str) else task
-        self.world = self.task.resolved_world()
+        self.world = self.task.resolved_world().resolved(seed)  # random placements for this seed
         self.robot = robot
         self.mode = mode
         self.seed = seed
@@ -76,7 +76,11 @@ class Episode:
         self._last_eye_t = -1e9
         self.last_result: dict[str, Any] | None = None
         self.perception.update(self.sim.data, self.sim.state().t)
-        self.start_distance = self._distance(self.task.success)
+        self.answer: str | None = None
+        self.claimed_success: bool | None = None
+        self._seq: dict[int, int] = {}
+        self._d0: dict[int, float] = {}
+        self._progress(self.task.success)  # record starting distances
         self._write_result()
 
     # ------------------------------------------------------------- scoring
@@ -102,11 +106,50 @@ class Episode:
         if pred.robot_near is not None:
             d = float(np.linalg.norm(self._obj(pred.robot_near["object"])[:2] - st_pos))
             return max(0.0, d - float(pred.robot_near.get("distance", 0.5)))
+        if pred.answer is not None:
+            return 0.0 if self._answer_ok(pred.answer) else np.inf
         if pred.all is not None:
             return max(self._distance(p) for p in pred.all)
         if pred.any is not None:
             return min(self._distance(p) for p in pred.any)
+        if pred.sequence is not None:
+            # Steps latch: once step k has happened, only steps after it matter.
+            k = self._seq.get(id(pred), 0)
+            while k < len(pred.sequence) and self._distance(pred.sequence[k]) <= 0.0:
+                k += 1
+            self._seq[id(pred)] = k
+            return 0.0 if k == len(pred.sequence) else self._distance(pred.sequence[k]) + 1e-3
         return np.inf
+
+    @staticmethod
+    def _norm_answer(text: str) -> str:
+        words = {"zero": "0", "one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6",
+                 "seven": "7", "eight": "8", "nine": "9", "ten": "10", "eleven": "11", "twelve": "12"}
+        t = text.strip().lower().strip(".!?\"' ")
+        return words.get(t, t)
+
+    def _answer_ok(self, expected: str | list[str]) -> bool:
+        if self.answer is None:
+            return False
+        options = [expected] if isinstance(expected, str) else expected
+        return self._norm_answer(self.answer) in {self._norm_answer(o) for o in options}
+
+    def _progress(self, pred: Predicate) -> float:
+        """0..1: how much of the predicate is done (used for partial credit)."""
+        if pred.all is not None:
+            return float(np.mean([self._progress(p) for p in pred.all]))
+        if pred.any is not None:
+            return max(self._progress(p) for p in pred.any)
+        if pred.sequence is not None:
+            self._distance(pred)
+            k = self._seq.get(id(pred), 0)
+            n = len(pred.sequence)
+            return 1.0 if k >= n else (k + self._progress(pred.sequence[k])) / n
+        if pred.answer is not None:
+            return 1.0 if self._answer_ok(pred.answer) else 0.0
+        d = self._distance(pred)
+        d0 = self._d0.setdefault(id(pred), max(d, 1e-6))
+        return float(np.clip(1.0 - d / d0, 0.0, 1.0))
 
     @property
     def success(self) -> bool:
@@ -117,10 +160,7 @@ class Episode:
         return self.ended_by is not None
 
     def progress(self) -> float:
-        if self.success:
-            return 1.0
-        d0 = max(self.start_distance, 1e-6)
-        return float(np.clip(1.0 - self._distance(self.task.success) / d0, 0.0, 1.0))
+        return 1.0 if self.success else self._progress(self.task.success)
 
     # ---------------------------------------------------------- sim hooks
     EYE_HZ = 5.0  # camera frames recorded for replay (what the robot saw, not only what the brain asked for)
@@ -141,6 +181,11 @@ class Episode:
         if self._tick % 5 == 0:
             self.perception.update(self.sim.data, st.t)
         self._record_eye(st)
+        if self.task.fail_if is not None and self._distance(self.task.fail_if) <= 0.0:
+            self.ended_by = "failed"
+            if self.recorder:
+                self.recorder.event(st.t, "TASK FAILED (constraint broken)", "WARN")
+            return "task failed: a rule of the task was broken"
         if self.success_t is None and self._distance(self.task.success) <= 0.0:
             self.success_t = st.t
             self.ended_by = "success"
@@ -238,6 +283,8 @@ class Episode:
         remaining = self.task.time_limit_s - self.sim.state().t + 0.05
         out = self.sim.execute(program, max_seconds=remaining, sense=self.perception, on_tick=self._on_tick,
                                metrics=self.metrics, recorder=self.recorder)
+        if out.status == "fell":
+            self.ended_by = self.ended_by or "fell"  # a fallen robot can't carry on (no get-up skill yet)
         st = self.sim.state()
         self.perception.update(self.sim.data, st.t)
         results = out.results
@@ -285,13 +332,20 @@ class Episode:
         return self._end("status", {}, t0, {"task": self.task.instruction, "success": self.success,
                                             "tool_calls_so_far": len(self.transcript)})
 
-    def finish(self, summary: str = "") -> dict[str, Any]:
-        t0 = self._begin("finish", {"summary": summary})
+    def finish(self, summary: str = "", success: bool | None = None, answer: str | None = None) -> dict[str, Any]:
+        args = {"summary": summary, "success": success, "answer": answer}
+        t0 = self._begin("finish", args)
         self.brain_summary = summary
+        self.claimed_success = success
+        if answer is not None:
+            self.answer = str(answer)
+            if self.success_t is None and not self.over and self._distance(self.task.success) <= 0.0:
+                self.success_t = self.sim.state().t
+                self.ended_by = "success"
         if not self.over:
             self.ended_by = "brain_finished"
-        out = self._end("finish", {"summary": summary}, t0, {"success": self.success,
-                                                             "message": "episode closed; results recorded"})
+        out = self._end("finish", args, t0, {"success": self.success,
+                                             "message": "episode closed; results recorded"})
         self.close()
         return out
 
@@ -323,7 +377,10 @@ class Episode:
             "brain_stats": {"tool_calls": calls, "invalid_calls": self.invalid_calls, "skills_used": skills_used,
                             "think_time_s": round(self.think_time, 2),
                             "mean_think_s": round(self.think_time / max(calls - 1, 1), 2),
-                            "summary": self.brain_summary},
+                            "summary": self.brain_summary,
+                            "claimed_success": self.claimed_success,
+                            "overclaimed": bool(self.claimed_success) and not self.success,
+                            "answer": self.answer},
             "metrics": self.metrics.result(),
             "recording": str(self.run_dir / "recording.rrd"),
             "view_with": f"rw view {self.run_id}",

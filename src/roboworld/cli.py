@@ -141,11 +141,12 @@ def serve_robot(
     run_id: Optional[str] = typer.Option(None, help="results go to runs/<run_id>"),
     brain: Optional[str] = typer.Option(None, help="label for the brain, recorded in results"),
     http: Optional[int] = typer.Option(None, help="serve over streamable HTTP on this port instead of stdio"),
+    record: bool = typer.Option(True, help="write a Rerun recording of the episode"),
 ) -> None:
     """Run a robot episode as an MCP server: any MCP client can be the brain."""
     from roboworld.mcp.robot_server import create_robot_server
 
-    server = create_robot_server(robot, task, mode=mode, seed=seed, run_id=run_id, brain=brain)
+    server = create_robot_server(robot, task, mode=mode, seed=seed, run_id=run_id, brain=brain, record=record)
     if http:
         server.run("streamable-http", host="127.0.0.1", port=http)
     else:
@@ -189,6 +190,49 @@ def episode(
     else:
         raise typer.BadParameter(f"unknown brain '{brain}'")
     _print(runner.episode_summary(result))
+
+
+@app.command()
+def bench(
+    robots: str = typer.Option("go2,open_duck_mini_v2", help="comma-separated robots"),
+    tasks: str = typer.Option("all", help="comma-separated tasks, or all"),
+    brains: str = typer.Option("baseline", help="comma-separated brains: baseline, codex, claude-code, a spec .yaml…"),
+    seeds: int = typer.Option(2, help="random placements per task"),
+    mode: str = typer.Option("paused", help="paused | realtime"),
+    jobs: int = typer.Option(3, help="episodes in parallel (in-process brains; agent CLIs run one at a time)"),
+    max_turns: int = 40,
+    record: bool = typer.Option(False, help="keep Rerun recordings (≈5-15 MB per episode)"),
+    name: str = typer.Option("", help="label for the bench folder"),
+) -> None:
+    """Run robots × brains × tasks × seeds and write a comparison report."""
+    from roboworld.bench import run_bench
+
+    done = {"n": 0}
+
+    def tick(row: dict) -> None:
+        done["n"] += 1
+        mark = "✓" if row["success"] else ("!" if row["error"] else "·")
+        typer.echo(f"  {mark} {row['brain']:<24} {row['robot']:<18} {row['task']:<28} s{row['seed']} "
+                   f"{row['status']}" + (f"  ({row['error']})" if row["error"] else ""))
+
+    out = run_bench([r.strip() for r in robots.split(",")], [t.strip() for t in tasks.split(",")],
+                    [b.strip() for b in brains.split(",")], seeds, mode=mode, parallel=jobs, max_turns=max_turns,
+                    record=record, name=name, progress_cb=tick)
+    typer.echo("")
+    for b in out["leaderboard"]:
+        a = out["by_brain"][b]
+        typer.echo(f"{b:<28} success {a['successes']}/{a['episodes']} ({100 * a['success_rate']:.0f}%)  "
+                   f"progress {100 * a['mean_progress']:.0f}%  overclaim {a['overclaim_rate']}")
+    typer.echo(f"\nreport: {out['report']}")
+
+
+@app.command()
+def brains() -> None:
+    """List brains you can use with `rw bench` / `rw episode`."""
+    from roboworld.brain.registry import list_brains
+
+    for b in list_brains():
+        typer.echo(f"{b['name']:<18} {b['type']:<10} {b['about']}")
 
 
 @app.command("robot-config")

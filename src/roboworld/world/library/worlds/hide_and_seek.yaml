@@ -1,10 +1,10 @@
 name: hide_and_seek
 description: >-
   A 4 x 4 m walled room. A red ball is somewhere behind the robot, and two
-  crates block parts of the view. The robot starts in the middle facing +x.
+  crates block parts of the view. The robot starts in the middle.
 walls: {half_size: [2.0, 2.0], height: 0.25}
-robot_start: {pos: [0.0, 0.0], yaw_deg: 0}
+robot_start: {pos: [0.0, 0.0], yaw_deg: 0, yaw_range_deg: [-25, 25]}
 objects:
-  - {name: red_ball, shape: sphere, size: [0.07], pos: [-1.1, 1.0], color: red, mass: 0.08}
+  - {name: red_ball, shape: sphere, size: [0.07], pos: [-1.1, 1.0], place_in: [[-1.6, -0.6], [-1.5, 1.5]], color: red, mass: 0.08}
   - {name: blue_crate, shape: box, size: [0.12, 0.12, 0.1], pos: [0.9, -0.5], color: blue, mass: 2.0, movable: false}
   - {name: yellow_crate, shape: box, size: [0.1, 0.1, 0.12], pos: [-0.5, -1.2], color: yellow, mass: 2.0, movable: false}

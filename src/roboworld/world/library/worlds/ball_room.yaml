@@ -1,10 +1,10 @@
 name: ball_room
 description: >-
-  A 4 x 4 m walled room with a red ball, a blue crate and a green goal area
-  painted on the floor. The robot starts in the middle facing +x.
+  A 4 x 4 m walled room with a red play ball, a blue crate and a green goal
+  area painted on the floor. The robot starts in the middle facing +x.
 walls: {half_size: [2.0, 2.0], height: 0.25}
 robot_start: {pos: [0.0, 0.0], yaw_deg: 0}
 objects:
-  - {name: red_ball, shape: sphere, size: [0.13], pos: [0.9, 0.35], color: red, mass: 0.2}
-  - {name: blue_crate, shape: box, size: [0.12, 0.12, 0.1], pos: [-0.6, -1.1], color: blue, mass: 2.0}
-  - {name: green_goal, shape: region, size: [0.3, 0.3], pos: [1.5, -0.9], color: green, kind: goal}
+  - {name: red_ball, shape: sphere, size: [0.13], pos: [0.9, 0.35], place_in: [[0.5, 1.0], [0.0, 0.8]], color: red, mass: 0.2}
+  - {name: blue_crate, shape: box, size: [0.12, 0.12, 0.1], pos: [-0.6, -1.1], place_in: [[-1.4, -0.4], [-1.5, -0.5]], color: blue, mass: 2.0}
+  - {name: green_goal, shape: region, size: [0.3, 0.3], pos: [1.5, -0.9], place_in: [[0.7, 1.3], [-1.3, -0.9]], color: green, kind: goal}

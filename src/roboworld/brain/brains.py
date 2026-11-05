@@ -99,7 +99,8 @@ class OpenAICompatBrain(Brain):
     transport: httpx.AsyncBaseTransport | None = None  # tests inject a mock
 
     def __post_init__(self) -> None:
-        self.name = f"openai-compat:{self.model}"
+        if self.name == "brain":
+            self.name = f"openai-compat:{self.model}"
         self.stats = {"model": self.model, "base_url": self.base_url, "llm_calls": 0, "prompt_tokens": 0,
                       "completion_tokens": 0, "llm_latency_s": 0.0, "nudges": 0}
 

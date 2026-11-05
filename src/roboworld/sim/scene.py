@@ -7,11 +7,31 @@ import numpy as np
 
 from roboworld.lang.manifest import Manifest
 from roboworld.robots import load_manifest, load_robot_spec
-from roboworld.world.spec import WorldObject, WorldSpec
+from roboworld.world.spec import WALL_NAMES, WorldObject, WorldSpec
 
 FLOOR_NAME = "rw_floor"
 CAMERA_NAME = "robot_cam"
 OBJECT_PREFIX = "w_"
+
+# Collision bits. Robot body stand-ins (PROXY) touch world things but not the floor or each other.
+WORLD_CONTYPE, WORLD_CONAFFINITY = 1 | 8, 1 | 4
+PROXY_CONTYPE, PROXY_CONAFFINITY = 4, 8
+
+
+def add_body_proxies(spec: mujoco.MjSpec) -> int:
+    """Let visual meshes of bodies with no collision geometry (e.g. the duck's legs and trunk)
+    collide with world objects, so robots can't walk through balls and boxes. Returns how many."""
+    colliding_bodies = {id(g.parent) for g in spec.geoms if g.contype or g.conaffinity}
+    count = 0
+    for g in spec.geoms:
+        body = g.parent
+        if body is spec.worldbody or id(body) in colliding_bodies or g.contype or g.conaffinity:
+            continue
+        if g.group != 2 or g.type != mujoco.mjtGeom.mjGEOM_MESH:
+            continue
+        g.contype, g.conaffinity = PROXY_CONTYPE, PROXY_CONAFFINITY
+        count += 1
+    return count
 
 
 def _camera_frame(spec: mujoco.MjSpec, manifest: Manifest) -> tuple[str, np.ndarray, np.ndarray] | None:
@@ -62,7 +82,8 @@ def _add_object(spec: mujoco.MjSpec, obj: WorldObject) -> None:
         spec.worldbody.add_geom(name=name, type=gtype, size=[obj.size[0], obj.size[1], 0.0005],
                                 pos=[x, y, 0.0006], quat=quat, rgba=rgba, contype=0, conaffinity=0, group=0)
         return
-    kwargs: dict = {"name": name, "type": gtype, "size": size, "rgba": rgba, "group": 0}
+    kwargs: dict = {"name": name, "type": gtype, "size": size, "rgba": rgba, "group": 0,
+                    "contype": WORLD_CONTYPE, "conaffinity": WORLD_CONAFFINITY}
     if obj.shape == "sphere":
         # Rolling resistance (like a ball on carpet) so a nudged ball doesn't roll away.
         kwargs.update(condim=6, friction=[obj.friction or 0.8, 0.02, 0.015])
@@ -83,17 +104,34 @@ def _add_walls(spec: mujoco.MjSpec, world: WorldSpec) -> None:
     hx, hy = w.half_size
     t, h = w.thickness / 2, w.height / 2
     rgba = list(WorldObject(name="_", shape="box", size=[1, 1, 1], pos=[0, 0], color=w.color).rgba)
-    for k, (pos, size) in enumerate([
+    for name, (pos, size) in zip(WALL_NAMES, [
         ([hx + t, 0, h], [t, hy + 2 * t, h]), ([-hx - t, 0, h], [t, hy + 2 * t, h]),
         ([0, hy + t, h], [hx, t, h]), ([0, -hy - t, h], [hx, t, h]),
-    ]):
-        spec.worldbody.add_geom(name=f"{OBJECT_PREFIX}wall{k}", type=mujoco.mjtGeom.mjGEOM_BOX, pos=pos, size=size,
-                                rgba=rgba, group=0)
+    ], strict=True):
+        spec.worldbody.add_geom(name=OBJECT_PREFIX + name, type=mujoco.mjtGeom.mjGEOM_BOX, pos=pos, size=size,
+                                rgba=rgba, group=0, contype=WORLD_CONTYPE, conaffinity=WORLD_CONAFFINITY)
+
+
+def _add_bumps(spec: mujoco.MjSpec, world: WorldSpec) -> None:
+    rng = np.random.default_rng((world.seed or 0) + 7919)
+    for i, patch in enumerate(world.bumps):
+        (x0, x1), (y0, y1) = patch.area
+        rgba = list(WorldObject(name="_", shape="box", size=[1, 1, 1], pos=[0, 0], color=patch.color).rgba)
+        for k in range(patch.count):
+            hz = rng.uniform(*patch.height) / 2
+            hx, hy = rng.uniform(*patch.size, 2) / 2
+            yaw = rng.uniform(0, np.pi)
+            spec.worldbody.add_geom(
+                name=f"{OBJECT_PREFIX}bump{i}_{k}", type=mujoco.mjtGeom.mjGEOM_BOX, size=[hx, hy, hz],
+                pos=[rng.uniform(x0, x1), rng.uniform(y0, y1), hz], quat=[np.cos(yaw / 2), 0, 0, np.sin(yaw / 2)],
+                rgba=rgba, group=1, condim=3, friction=[0.9, 0.02, 0.01])
 
 
 def build_scene(robot: str, world: WorldSpec | None = None) -> mujoco.MjModel:
     spec = load_robot_spec(robot)
     manifest = load_manifest(robot)
+    if world is not None:
+        add_body_proxies(spec)
     mount = _camera_frame(spec, manifest)
     if mount is not None:
         body, pos, quat = mount
@@ -141,6 +179,7 @@ def build_scene(robot: str, world: WorldSpec | None = None) -> mujoco.MjModel:
     )
     if world is not None:
         _add_walls(spec, world)
+        _add_bumps(spec, world)
         for obj in world.objects:
             _add_object(spec, obj)
     return spec.compile()

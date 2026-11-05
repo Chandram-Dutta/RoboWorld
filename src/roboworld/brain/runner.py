@@ -39,9 +39,10 @@ def new_episode_id(robot: str, task: str) -> str:
     return f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{robot}-{task}-{secrets.token_hex(2)}"
 
 
-def server_args(robot: str, task: str, mode: str, seed: int, run_id: str, brain: str) -> list[str]:
+def server_args(robot: str, task: str, mode: str, seed: int, run_id: str, brain: str,
+                record: bool = True) -> list[str]:
     return ["-m", "roboworld.cli", "serve-robot", "--robot", robot, "--task", task, "--mode", mode,
-            "--seed", str(seed), "--run-id", run_id, "--brain", brain]
+            "--seed", str(seed), "--run-id", run_id, "--brain", brain, "--record" if record else "--no-record"]
 
 
 def _finalise(run_id: str, brain: Brain | None = None) -> dict[str, Any]:
@@ -55,10 +56,10 @@ def _finalise(run_id: str, brain: Brain | None = None) -> dict[str, Any]:
 
 
 async def run_episode_async(robot: str, task: str, brain: Brain, mode: str = "paused", seed: int = 0,
-                            max_turns: int = 40, run_id: str | None = None) -> dict[str, Any]:
+                            max_turns: int = 40, run_id: str | None = None, record: bool = True) -> dict[str, Any]:
     run_id = run_id or new_episode_id(robot, task)
     params = StdioServerParameters(command=sys.executable,
-                                   args=server_args(robot, task, mode, seed, run_id, brain.name),
+                                   args=server_args(robot, task, mode, seed, run_id, brain.name, record),
                                    cwd=str(paths.HOME), env=server_env())
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
@@ -77,10 +78,11 @@ def server_env() -> dict[str, str]:
     return {**os.environ, "ROBOWORLD_RUNS_DIR": str(paths.RUNS_DIR), "ROBOWORLD_HOME": str(paths.HOME)}
 
 
-def mcp_config(robot: str, task: str, mode: str, seed: int, run_id: str, brain: str) -> dict[str, Any]:
+def mcp_config(robot: str, task: str, mode: str, seed: int, run_id: str, brain: str,
+               record: bool = True) -> dict[str, Any]:
     """Config any MCP client can use to launch this episode's robot server."""
     return {"mcpServers": {"robot": {"command": sys.executable,
-                                     "args": server_args(robot, task, mode, seed, run_id, brain),
+                                     "args": server_args(robot, task, mode, seed, run_id, brain, record),
                                      "cwd": str(paths.HOME),
                                      "env": {"ROBOWORLD_RUNS_DIR": str(paths.RUNS_DIR),
                                              "ROBOWORLD_HOME": str(paths.HOME)}}}}
@@ -103,7 +105,7 @@ def codex_flags(cfg: dict[str, Any], name: str = "robot") -> str:
 
 
 def run_command_brain(robot: str, task: str, command: str, mode: str = "paused", seed: int = 0,
-                      run_id: str | None = None, timeout: float = 1800.0) -> dict[str, Any]:
+                      run_id: str | None = None, timeout: float = 1800.0, record: bool = True) -> dict[str, Any]:
     """Run an external agent CLI as the brain. ``command`` may use {prompt}, {mcp_config},
     {codex_flags}, {run_dir} and {run_id}."""
     command = PRESETS.get(command, command)
@@ -111,7 +113,7 @@ def run_command_brain(robot: str, task: str, command: str, mode: str = "paused",
     run_dir = paths.RUNS_DIR / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     label = shlex.split(command)[0]
-    cfg = mcp_config(robot, task, mode, seed, run_id, label)
+    cfg = mcp_config(robot, task, mode, seed, run_id, label, record)
     cfg_path = run_dir / "mcp_config.json"
     cfg_path.write_text(json.dumps(cfg, indent=2))
     cmd = command.format(prompt=shlex.quote(task_prompt(robot, task, mode)), mcp_config=shlex.quote(str(cfg_path)),

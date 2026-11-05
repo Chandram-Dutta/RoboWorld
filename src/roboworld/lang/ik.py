@@ -90,22 +90,41 @@ class Kinematics:
 
     def front_reach(self) -> float:
         """How far the robot's collision geometry extends in front of the base (default pose), metres."""
-        if not hasattr(self, "_front"):
+        return self._extent()[1]
+
+    def back_reach(self) -> float:
+        """How far the body extends behind the base (bumper height, default pose), metres."""
+        return max(0.0, -self._extent()[0])
+
+    def half_width(self) -> float:
+        """Half the robot's width (collision geometry, default pose), metres."""
+        ymin, ymax = self._extent()[2:]
+        return max(abs(ymin), abs(ymax))
+
+    def _extent(self) -> tuple[float, float, float, float]:
+        """(xmin, xmax, ymin, ymax) of the robot's body below 'bumper height' (0.25 m above its
+        lowest point) in the base frame at the default pose: what bumps into things on the floor."""
+        if not hasattr(self, "_ext"):
             q = np.array([self.manifest.poses[self.manifest.default_pose].get(j, 0.0) for j in self.names])
             self.data.qpos[:] = self._full_q(q)
             mujoco.mj_kinematics(self.model, self.data)
-            xmax = 0.0
+            pts = []
             for g in range(self.model.ngeom):
-                if not (self.model.geom_contype[g] or self.model.geom_conaffinity[g]):
+                solid = self.model.geom_contype[g] or self.model.geom_conaffinity[g]
+                if not solid and self.model.geom_group[g] != 2:
                     continue
                 c, h = self.model.geom_aabb[g, :3], self.model.geom_aabb[g, 3:]
                 for sx in (-1, 1):
                     for sy in (-1, 1):
                         for sz in (-1, 1):
                             pw = self.data.geom_xpos[g] + self.data.geom_xmat[g].reshape(3, 3) @ (c + h * [sx, sy, sz])
-                            xmax = max(xmax, float(self.to_base(pw).pos[0]))
-            self._front = xmax
-        return self._front
+                            pts.append(self.to_base(pw).pos)
+            p3 = np.array(pts) if pts else np.zeros((1, 3))
+            low = p3[:, 2] < p3[:, 2].min() + 0.25
+            a = p3[low][:, :2] if low.any() else p3[:, :2]
+            self._ext = (float(a[:, 0].min()), float(max(a[:, 0].max(), 0.0)), float(a[:, 1].min()),
+                         float(a[:, 1].max()))
+        return self._ext
 
     def _task(self, effector: str) -> mink.FrameTask:
         if effector not in self._tasks:

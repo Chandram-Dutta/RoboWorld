@@ -1,0 +1,5 @@
+name: cross_bumpy_ground
+instruction: Walk across the bumpy ground and stand in the green area on the far side without falling.
+world: bumpy_field
+success: {robot_in_region: green_area}
+time_limit_s: 150

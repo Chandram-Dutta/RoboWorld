@@ -1,0 +1,10 @@
+name: ball_pit
+description: A walled room with several balls of different colours scattered around.
+walls: {half_size: [2.0, 2.0], height: 0.25}
+robot_start: {pos: [0.0, 0.0], yaw_deg: 0, yaw_range_deg: [-180, 180]}
+objects:
+  - {name: ball_1, shape: sphere, size: [0.08], pos: [1, 1], place_in: [[-1.7, 1.7], [-1.7, 1.7]], color: red, mass: 0.1}
+  - {name: ball_2, shape: sphere, size: [0.08], pos: [1, -1], place_in: [[-1.7, 1.7], [-1.7, 1.7]], color: red, mass: 0.1}
+  - {name: ball_3, shape: sphere, size: [0.08], pos: [-1, 1], place_in: [[-1.7, 1.7], [-1.7, 1.7]], color: red, mass: 0.1}
+  - {name: ball_4, shape: sphere, size: [0.08], pos: [-1, -1], place_in: [[-1.7, 1.7], [-1.7, 1.7]], color: blue, mass: 0.1}
+  - {name: ball_5, shape: sphere, size: [0.08], pos: [0, 1.5], place_in: [[-1.7, 1.7], [-1.7, 1.7]], color: yellow, mass: 0.1}

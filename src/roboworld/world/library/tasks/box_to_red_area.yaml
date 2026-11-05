@@ -1,0 +1,5 @@
+name: box_to_red_area
+instruction: Push the blue box into the red area painted on the floor.
+world: box_room
+success: {object_in_region: {object: blue_box, region: red_area}}
+time_limit_s: 180

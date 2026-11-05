@@ -1,0 +1,7 @@
+name: count_red_balls
+instruction: >-
+  How many red balls are in the room? Look around, then call finish with your
+  answer as a number (finish(answer="...")).
+world: ball_pit
+success: {answer: ["3", "three"]}
+time_limit_s: 120

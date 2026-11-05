@@ -7,6 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
+import numpy as np
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -37,6 +38,8 @@ class WorldObject(_Strict):
     movable: bool = True
     friction: float | None = None
     kind: str | None = Field(None, description="semantic label, e.g. ball, box, goal (default from shape)")
+    place_in: list[list[float]] | None = Field(
+        None, description="random placement per seed: [[x_min, x_max], [y_min, y_max]] (overrides pos x, y)")
 
     @model_validator(mode="after")
     def _check(self) -> WorldObject:
@@ -71,16 +74,38 @@ class WorldObject(_Strict):
         return float((self.size[0] ** 2 + self.size[1] ** 2) ** 0.5)
 
 
+WALL_NAMES = ("wall_east", "wall_west", "wall_north", "wall_south")
+
+
 class Walls(_Strict):
     half_size: list[float] = Field(min_length=2, max_length=2, description="[hx, hy] of the enclosed area")
     height: float = 0.25
     thickness: float = 0.04
     color: str = "white"
 
+    def segments(self) -> dict[str, tuple[tuple[float, float], tuple[float, float]]]:
+        """Inner face of each wall as a 2-D segment."""
+        hx, hy = self.half_size
+        return {
+            "wall_east": ((hx, -hy), (hx, hy)), "wall_west": ((-hx, -hy), (-hx, hy)),
+            "wall_north": ((-hx, hy), (hx, hy)), "wall_south": ((-hx, -hy), (hx, -hy)),
+        }
+
 
 class RobotStart(_Strict):
     pos: list[float] = Field(default_factory=lambda: [0.0, 0.0], min_length=2, max_length=2)
     yaw_deg: float = 0.0
+    yaw_range_deg: list[float] | None = Field(None, min_length=2, max_length=2, description="random yaw per seed")
+
+
+class Bumps(_Strict):
+    """A patch of small fixed bumps on the floor (rough ground)."""
+
+    area: list[list[float]] = Field(description="[[x_min, x_max], [y_min, y_max]]")
+    count: int = Field(30, ge=1, le=400)
+    height: list[float] = Field(default_factory=lambda: [0.005, 0.015], min_length=2, max_length=2)
+    size: list[float] = Field(default_factory=lambda: [0.03, 0.08], min_length=2, max_length=2)
+    color: str = "brown"
 
 
 class WorldSpec(_Strict):
@@ -89,6 +114,30 @@ class WorldSpec(_Strict):
     walls: Walls | None = None
     objects: list[WorldObject] = Field(default_factory=list)
     robot_start: RobotStart = Field(default_factory=RobotStart)
+    bumps: list[Bumps] = Field(default_factory=list)
+    seed: int | None = Field(None, description="set when random placements have been resolved")
+
+    def resolved(self, seed: int) -> WorldSpec:
+        """A concrete copy: random placements drawn for this seed, kept apart from each other and the robot."""
+        rng = np.random.default_rng(seed)
+        out = self.model_copy(deep=True)
+        start = out.robot_start
+        if start.yaw_range_deg:
+            start.yaw_deg = float(rng.uniform(*start.yaw_range_deg))
+        placed: list[tuple[np.ndarray, float]] = [(np.asarray(start.pos, dtype=float), 0.45)]
+        placed += [(np.asarray(o.pos[:2], dtype=float), o.radius_xy) for o in out.objects if o.place_in is None]
+        for obj in out.objects:
+            if obj.place_in is None:
+                continue
+            (x0, x1), (y0, y1) = obj.place_in
+            for _ in range(500):
+                p = np.array([rng.uniform(x0, x1), rng.uniform(y0, y1)])
+                if all(np.linalg.norm(p - q) > obj.radius_xy + r + 0.15 for q, r in placed):
+                    break
+            obj.pos = [float(p[0]), float(p[1])] + list(obj.pos[2:])
+            placed.append((p, obj.radius_xy))
+        out.seed = seed
+        return out
 
     def object(self, name: str) -> WorldObject:
         for o in self.objects:
@@ -106,8 +155,10 @@ class Predicate(_Strict):
     object_in_region: dict[str, str] | None = Field(None, description="{object, region}")
     robot_in_region: str | None = None
     robot_near: dict[str, Any] | None = Field(None, description="{object, distance}")
+    answer: str | list[str] | None = Field(None, description="the brain's finish(answer=...) must match one of these")
     all: list[Predicate] | None = None
     any: list[Predicate] | None = None
+    sequence: list[Predicate] | None = Field(None, description="each must become true, in this order")
 
     @model_validator(mode="after")
     def _one(self) -> Predicate:
@@ -122,6 +173,7 @@ class TaskSpec(_Strict):
     instruction: str = Field(description="what the brain is told to do")
     world: str | WorldSpec
     success: Predicate
+    fail_if: Predicate | None = Field(None, description="the episode fails as soon as this is true")
     time_limit_s: float = 120.0
     robots: list[str] | None = Field(None, description="robots this task is designed for (None = any mobile)")
 

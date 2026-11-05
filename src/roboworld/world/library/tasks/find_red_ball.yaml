@@ -2,4 +2,4 @@ name: find_red_ball
 instruction: Find the red ball and go stand next to it (body centre within 0.6 m of the ball).
 world: hide_and_seek
 success: {robot_near: {object: red_ball, distance: 0.6}}
-time_limit_s: 120
+time_limit_s: 150

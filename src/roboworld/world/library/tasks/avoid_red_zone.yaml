@@ -1,0 +1,8 @@
+name: avoid_red_zone
+instruction: >-
+  Go and stand in the green area. Never step into the red no-go zone painted
+  on the floor: touching it fails the task.
+world: danger_zone
+success: {robot_in_region: green_area}
+fail_if: {robot_in_region: red_zone}
+time_limit_s: 150

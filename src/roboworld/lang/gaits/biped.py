@@ -130,8 +130,9 @@ class BipedWalk(GaitController):
         self.wz_eff = s.wz
         first_support = self.right if (s.vy > 0 or s.wz > 0) else self.left
         mid = (feet[self.left][:2] + feet[self.right][:2]) / 2
+        yaw0 = (feet[self.left][2] + feet[self.right][2]) / 2
         self.phases = [Phase("shift", 0.0, self.T * 1.5, self.T * 1.5, mid, self._zmp_point(feet[first_support]),
-                             feet, support=first_support)]
+                             feet, support=first_support, extra={"center": np.array([mid[0], mid[1], yaw0])})]
         self.current = 0
 
     def _sides(self, frames: dict[str, Frame]) -> tuple[str, str]:
@@ -143,20 +144,23 @@ class BipedWalk(GaitController):
         return foot_pose[:2] + rot_z(foot_pose[2])[:2, :2] @ np.array([off, 0.0])
 
     # ------------------------------------------------------------ planning
-    def _landing(self, support_pose: np.ndarray, swing: str, closing: bool) -> np.ndarray:
+    def _landing(self, center: np.ndarray, swing: str, closing: bool) -> tuple[np.ndarray, np.ndarray]:
+        """Advance the planned body centre by one step of the command, then place the swing
+        foot beside it. Planning around the centre (not the support foot) keeps left and right
+        turns symmetric and stops the body drifting while turning on the spot."""
         s = self.settings
         side = 1.0 if swing == self.left else -1.0
         if closing:
-            dx, dy, dyaw = 0.0, 0.0, 0.0
+            new_center = center.copy()
         else:
             max_step = s.params.get("max_step", 0.08)
             dx = float(np.clip(s.vx * self.T, -max_step, max_step))
             dy = float(np.clip(s.vy * self.T, -max_step / 2, max_step / 2))
             dyaw = float(np.clip(self.wz_eff * self.T, -0.35, 0.35))
-        yaw = support_pose[2] + dyaw
-        lateral = max(side * self.width + dy, 0.6 * self.width) if side > 0 else min(side * self.width + dy, -0.6 * self.width)
-        xy = support_pose[:2] + rot_z(yaw)[:2, :2] @ np.array([dx, lateral])
-        return np.array([xy[0], xy[1], yaw])
+            xy = center[:2] + rot_z(center[2])[:2, :2] @ np.array([dx, dy])
+            new_center = np.array([xy[0], xy[1], center[2] + dyaw])
+        foot_xy = new_center[:2] + rot_z(new_center[2])[:2, :2] @ np.array([0.0, side * self.width / 2])
+        return np.array([foot_xy[0], foot_xy[1], new_center[2]]), new_center
 
     def _extend(self, until: float) -> None:
         while self.phases[-1].t1 < until:
@@ -166,14 +170,15 @@ class BipedWalk(GaitController):
             if prev.kind == "hold":
                 prev.t1 = until + 1.0
                 return
+            center = prev.extra["center"]
             if prev.kind == "final":
                 mid = prev.zmp_to
-                self.phases.append(Phase("hold", t0, t0 + 0.6, 0.0, mid, mid, feet))
+                self.phases.append(Phase("hold", t0, t0 + 0.6, 0.0, mid, mid, feet, extra={"center": center}))
                 continue
             if self.stopping and (prev.kind == "shift" or prev.closing):
                 mid = (feet[self.left][:2] + feet[self.right][:2]) / 2
                 self.phases.append(Phase("final", t0, t0 + self.T * 1.5, self.T * 1.5,
-                                         prev.zmp_to, mid, feet))
+                                         prev.zmp_to, mid, feet, extra={"center": center}))
                 continue
             if prev.kind == "shift":
                 support = prev.support
@@ -181,11 +186,12 @@ class BipedWalk(GaitController):
                 support = prev.swing  # the foot that just landed
             swing = self.left if support == self.right else self.right
             closing = self.stopping
-            landing = self._landing(feet[support], swing, closing)
+            landing, new_center = self._landing(center, swing, closing)
             zmp_from = prev.zmp_to
             zmp_to = self._zmp_point(feet[support])
             self.phases.append(Phase("step", t0, t0 + self.T, self.ds, zmp_from, zmp_to, feet,
-                                     swing=swing, swing_to=landing, closing=closing, support=support))
+                                     swing=swing, swing_to=landing, closing=closing, support=support,
+                                     extra={"center": new_center}))
 
     def request_stop(self) -> None:
         if self.stopping:

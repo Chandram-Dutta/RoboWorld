@@ -403,15 +403,19 @@ class WalkToArgs(_Args):
     speed: float | None = Field(None, gt=0)
 
 
-@skill("walk_to", "Walk to a seen object or a point, steering as it goes (no obstacle avoidance: "
-       "if something is in the way it reports 'blocked').", WalkToArgs, can_move)
+@skill("walk_to", "Walk to a seen object or a point, steering as it goes. Stops next to solid objects and walks "
+       "onto painted areas. No obstacle avoidance: if something is in the way it reports 'blocked' (use "
+       "intermediate [x, y] points to go around).", WalkToArgs, can_move)
 class WalkTo(MovingSkill):
     name = "walk_to"
 
     def setup(self, ctx: Ctx) -> None:
         goal, det = self.locate(ctx, self.args.target)
         front = ctx.kin.front_reach()
-        default_stop = front + (det.size_m / 2 if det else 0.0) + 0.08
+        if det is not None and det.flat:
+            default_stop = 0.06  # painted areas: walk onto them
+        else:
+            default_stop = front + (det.size_m / 2 if det else 0.0) + 0.08
         self.stop = self.args.stop_distance or default_stop
         dist = float(np.linalg.norm(goal - ctx.state.base_pos[:2]))
         self.timeout = dist / max(self.mover.speed, 1e-3) * 3 + 10
@@ -540,24 +544,31 @@ class PushArgs(_Args):
     speed: float | None = Field(None, gt=0)
 
 
-@skill("push", "Push a seen object to a seen area or point: walks around behind it, lines up and shoves it "
-       "along. Keeps track of the object even when it's too close to see.", PushArgs, can_move)
+@skill("push", "Push a seen object to a seen area or point. Walks around behind it, lines up and dribbles it "
+       "along. Plans around walls and obstacles it has seen (via a detour point if the object is stuck near a "
+       "wall), and backs off to re-find the object if it loses track.", PushArgs, can_move)
 class Push(MovingSkill):
     name = "push"
-    timeout = 150.0
+    timeout = 170.0
+    BLIND_S = 2.5  # how long to trust "it's riding in front of me" without seeing it
 
     def setup(self, ctx: Ctx) -> None:
-        self.state_name = "approach"
-        self.waypoints: list[np.ndarray] = []
-        self.attempts = 0
         self.front = ctx.kin.front_reach()
+        self.back = ctx.kin.back_reach()
+        self.half_w = ctx.kin.half_width()
+        self.attempts = 0
+        self.last_seen_t = ctx.t
         self.backoff_from: np.ndarray | None = None
-        self._plan_approach(ctx)
+        self.no_route: str | None = None
+        self._plan_route(ctx)
 
+    # ------------------------------------------------------------ geometry
     def _object(self, ctx: Ctx) -> tuple[np.ndarray, float, bool]:
         sense = self.sense(ctx)
         det = sense.resolve(self.args.object)
         visible = det.name in sense.visible
+        if visible:
+            self.last_seen_t = ctx.t
         return np.asarray(det.position, dtype=float), det.size_m / 2, visible
 
     def _goal(self, ctx: Ctx) -> tuple[np.ndarray, float]:
@@ -567,34 +578,182 @@ class Push(MovingSkill):
             tol = max(0.08, min(det.half_extent) - 0.03)
         return goal, tol
 
-    def _plan_approach(self, ctx: Ctx) -> None:
+    def _clear(self, ctx: Ctx, point: np.ndarray, margin: float, ignore: str) -> bool:
+        """Is `point` inside the room (walls seen so far) and `margin` away from walls and solid obstacles?"""
+        inside_ref = ctx.state.base_pos[:2]  # the robot is inside the room
+        for d in self.sense(ctx).memory.values():
+            if d.name == ignore or d.flat:
+                continue
+            if d.kind == "wall":
+                a, b = (np.asarray(q, dtype=float) for q in d.segment)
+                n = np.array([-(b - a)[1], (b - a)[0]])
+                n /= max(float(np.linalg.norm(n)), 1e-9)
+                if float((inside_ref - a) @ n) < 0:
+                    n = -n  # make the normal point into the room
+                if float((point - a) @ n) < margin:
+                    return False
+            elif float(np.linalg.norm(point - np.asarray(d.position))) < margin + d.size_m / 2:
+                return False
+        return True
+
+    def _fits(self, ctx: Ctx, center: np.ndarray, heading: np.ndarray, ignore: str) -> bool:
+        """Does the robot's footprint (a rectangle facing `heading`) fit at `center`?"""
+        side = np.array([-heading[1], heading[0]])
+        for fx in (-self.back, 0.0, self.front):
+            for fy in (-self.half_w, 0.0, self.half_w):
+                if not self._clear(ctx, center + heading * fx + side * fy, 0.03, ignore):
+                    return False
+        return True
+
+    def _stand_point(self, p: np.ndarray, r: float, target: np.ndarray) -> np.ndarray:
+        u = (target - p) / max(float(np.linalg.norm(target - p)), 1e-6)
+        return p - u * (r + self.front + 0.07)
+
+    def _can_push(self, ctx: Ctx, p: np.ndarray, r: float, target: np.ndarray, ignore: str) -> bool:
+        u = (target - p) / max(float(np.linalg.norm(target - p)), 1e-6)
+        return self._fits(ctx, self._stand_point(p, r, target), u, ignore)
+
+    def _plan_route(self, ctx: Ctx) -> None:
+        """Push targets: straight to the goal, or via a detour point when the robot can't get behind."""
+        self.no_route = None
         p, r, _ = self._object(ctx)
         g, _ = self._goal(ctx)
-        u = (g - p) / max(np.linalg.norm(g - p), 1e-6)
-        stand = r + self.front + 0.07
-        approach = p - u * stand
+        name = self.sense(ctx).resolve(self.args.object).name
+        self.targets = [g]
+        if not self._can_push(ctx, p, r, g, name):
+            best, best_cost = None, np.inf
+            for radius in (0.35, 0.55, 0.8):
+                for ang in np.linspace(0, 2 * np.pi, 24, endpoint=False):
+                    i = p + radius * np.array([np.cos(ang), np.sin(ang)])
+                    if not self._clear(ctx, i, r + 0.08, name):
+                        continue
+                    if not (self._can_push(ctx, p, r, i, name) and self._can_push(ctx, i, r, g, name)):
+                        continue
+                    cost = float(np.linalg.norm(i - p) + np.linalg.norm(g - i))
+                    if cost < best_cost:
+                        best, best_cost = i, cost
+            if best is not None:
+                self.targets = [best, g]
+            else:
+                self.no_route = self._blocker(ctx, self._stand_point(p, r, g), name)
+        self._plan_approach(ctx)
+
+    def _blocker(self, ctx: Ctx, point: np.ndarray, ignore: str) -> str:
+        """Name of the wall/obstacle nearest to where the robot would need to stand."""
+        best, dist = "something", np.inf
+        for d in self.sense(ctx).memory.values():
+            if d.name == ignore or d.flat:
+                continue
+            gap = float(np.linalg.norm(point - d.nearest(point)))
+            if gap < dist:
+                best, dist = d.name, gap
+        return best
+
+    def _plan_approach(self, ctx: Ctx) -> None:
+        p, r, _ = self._object(ctx)
+        target = self.targets[0]
+        u = (target - p) / max(np.linalg.norm(target - p), 1e-6)
+        approach = self._stand_point(p, r, target)
         robot = ctx.state.base_pos[:2]
+        # Simple route: if not already behind the object, swing round its side first.
+        simple: list[np.ndarray] = []
         rel = robot - p
-        self.waypoints = []
         if np.linalg.norm(rel) > 1e-6 and float((rel / np.linalg.norm(rel)) @ -u) < 0.6:
             side = np.sign(u[0] * rel[1] - u[1] * rel[0]) or 1.0
             normal = np.array([-u[1], u[0]]) * side
-            clear = r + self.front + 0.2
-            self.waypoints.append(p + normal * clear - u * clear * 0.5)
-        self.waypoints.append(approach)
-        self.state_name = "approach"
-        self.t_state = ctx.t
+            clear = r + max(self.front, self.half_w) + 0.17
+            simple.append(p + normal * clear - u * clear * 0.5)
+        simple.append(approach)
+        # Use the grid planner only if that route runs into a wall or another known obstacle.
+        name = self.sense(ctx).resolve(self.args.object).name
+        free_other = lambda q: self._clear(ctx, q, self.half_w + 0.05, name)  # noqa: E731
+        legs = zip([robot, *simple[:-1]], simple, strict=True)
+        if all(self._segment_free(a, b, free_other) for a, b in legs):
+            self.waypoints = simple
+        else:
+            self.waypoints = (self._path(ctx, robot, approach) or []) + [approach]
+        self.state_name, self.t_state = "approach", ctx.t
+        self.best = np.inf
 
+    def _path(self, ctx: Ctx, start: np.ndarray, goal: np.ndarray) -> list[np.ndarray] | None:
+        """A* on a coarse grid around everything seen (including the object being pushed),
+        then shortcut to as few waypoints as possible. None if no path is needed or found."""
+        import heapq
+
+        clearance = self.half_w + 0.05
+        free = lambda q: self._clear(ctx, q, clearance, "")  # noqa: E731
+        if self._segment_free(start, goal, free):
+            return None
+        res = 0.08
+        lo = np.minimum(start, goal) - 1.5
+        hi = np.maximum(start, goal) + 1.5
+        nx, ny = (np.ceil((hi - lo) / res)).astype(int) + 1
+        cell = lambda q: (int(round((q[0] - lo[0]) / res)), int(round((q[1] - lo[1]) / res)))  # noqa: E731
+        point = lambda c: lo + np.array(c) * res  # noqa: E731
+        s0, g0 = cell(start), cell(goal)
+        cache: dict[tuple[int, int], bool] = {}
+
+        def ok(c: tuple[int, int]) -> bool:
+            if c in (s0, g0):
+                return True
+            if c not in cache:
+                cache[c] = 0 <= c[0] < nx and 0 <= c[1] < ny and free(point(c))
+            return cache[c]
+
+        frontier = [(0.0, s0)]
+        came: dict[tuple[int, int], tuple[int, int] | None] = {s0: None}
+        cost = {s0: 0.0}
+        while frontier:
+            _, c = heapq.heappop(frontier)
+            if c == g0:
+                break
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    n = (c[0] + dx, c[1] + dy)
+                    if (dx or dy) and ok(n):
+                        nc = cost[c] + float(np.hypot(dx, dy))
+                        if nc < cost.get(n, np.inf):
+                            cost[n], came[n] = nc, c
+                            heapq.heappush(frontier, (nc + float(np.hypot(g0[0] - n[0], g0[1] - n[1])), n))
+        if g0 not in came:
+            return None
+        cells, c = [], g0
+        while c is not None:
+            cells.append(point(c))
+            c = came[c]
+        cells.reverse()
+        # Shortcut: keep a waypoint only when the straight line to the next one is blocked.
+        out, anchor = [], start
+        for i in range(1, len(cells)):
+            if not self._segment_free(anchor, cells[i], free):
+                anchor = cells[i - 1]
+                out.append(anchor)
+        return out
+
+    @staticmethod
+    def _segment_free(a: np.ndarray, b: np.ndarray, free) -> bool:
+        n = max(2, int(np.linalg.norm(b - a) / 0.05))
+        return all(free(a + (b - a) * u) for u in np.linspace(0.0, 1.0, n)[1:-1])
+
+    # ------------------------------------------------------------- control
     def control(self, ctx: Ctx):
         st = ctx.state
         robot = st.base_pos[:2]
         p, r, visible = self._object(ctx)
         g, tol = self._goal(ctx)
-        if float(np.linalg.norm(p - g)) <= tol and self.state_name != "verify":
+        target = self.targets[0]
+        sub_tol = tol if len(self.targets) == 1 else 0.15
+        if self.state_name in ("approach", "align", "push") and float(np.linalg.norm(p - target)) <= sub_tol:
+            if len(self.targets) > 1:
+                self.targets.pop(0)  # reached the detour point: now push on to the goal
+                self._plan_approach(ctx)
+                return 0.0, 0.0, None
             self.state_name, self.backoff_from = "verify", robot.copy()
+        if self.no_route:
+            return False, (f"{self.args.object} is too close to {self.no_route}: there's no room to get behind it "
+                           f"and push it toward {self.args.to}"), {"blocked_by": self.no_route}
         if self.state_name == "approach":
-            target = self.waypoints[0]
-            vx, vy, heading, dist = self.nav(ctx, target, self.mover.speed)
+            vx, vy, heading, dist = self.nav(ctx, self.waypoints[0], self.mover.speed)
             if dist < 0.06:
                 self.waypoints.pop(0)
                 self.best = np.inf
@@ -604,7 +763,7 @@ class Push(MovingSkill):
             if self.stuck(ctx, dist, window=6.0):
                 return False, f"couldn't get behind {self.args.object}", {}
             return vx, vy, heading
-        line = float(np.arctan2(*(g - p)[::-1]))
+        line = float(np.arctan2(*(target - p)[::-1]))
         if self.state_name == "align":
             if abs(wrap(line - st.yaw)) < np.radians(8) or ctx.t - self.t_state > 10:
                 self.state_name, self.t_state = "push", ctx.t
@@ -615,35 +774,44 @@ class Push(MovingSkill):
             rel = p - robot
             ahead = float(rel @ fwd)
             lateral = float(rel @ np.array([-fwd[1], fwd[0]]))
-            if not visible and ahead < self.front + r + 0.12:
-                # Too close to see: assume the object rides in front of the robot.
+            u = (target - p) / max(np.linalg.norm(target - p), 1e-6)
+            if visible:
+                if abs(lateral) > r + 0.08 or ahead < 0:
+                    return self._retry(ctx, "slipped off to the side")
+                # Aim just past the object's centre along the push line: keeps contact centred.
+                aim = p + u * 0.1
+                heading = float(np.arctan2(*(aim - robot)[::-1]))
+            else:
+                if ctx.t - self.last_seen_t > self.BLIND_S:
+                    self.state_name, self.backoff_from = "reacquire", robot.copy()
+                    return 0.0, 0.0, None
+                # Too close to see: assume it rides in front of the robot.
                 p = robot + fwd * (self.front + r)
-                self.sense(ctx).memory[self.sense(ctx).resolve(self.args.object).name].position = p.tolist()
-            elif abs(lateral) > r + 0.08 or ahead < 0:
-                self.attempts += 1
-                if self.attempts > 5:
-                    return False, f"{self.args.object} keeps slipping away", {}
-                self._plan_approach(ctx)
-                return 0.0, 0.0, None
-            u = (g - p) / max(np.linalg.norm(g - p), 1e-6)
-            rp = robot - p
-            offset = float(u[0] * rp[1] - u[1] * rp[0])  # robot's signed distance from the push line
-            heading = line - float(np.clip(2.0 * offset, -0.5, 0.5))
-            to_go = float(np.linalg.norm(p - g))
+                sense = self.sense(ctx)
+                sense.memory[sense.resolve(self.args.object).name].position = p.tolist()
+                rp = robot - p
+                offset = float(u[0] * rp[1] - u[1] * rp[0])
+                heading = line - float(np.clip(2.0 * offset, -0.5, 0.5))
+            to_go = float(np.linalg.norm(p - target))
             if self.stuck(ctx, to_go, window=8.0):
-                return False, f"pushing made no progress ({to_go:.2f} m to go)", {}
-            # Dribble: push gently, and slower still near the goal so the object doesn't overshoot.
+                return self._retry(ctx, f"no progress ({to_go:.2f} m to go)")
             return self.mover.speed * float(np.clip(to_go / 0.6, 0.3, 0.55)), 0.0, heading
-        # verify: back off until the object is visible again, then check it really is in place
+        # verify / reacquire: back off until the object is visible again
         backed = float(np.linalg.norm(robot - self.backoff_from))
         if not visible and backed < 0.7:
             return -self.mover.vback * 0.7, 0.0, st.yaw
-        if visible and float(np.linalg.norm(p - g)) <= tol:
-            return True, f"pushed {self.args.object} to {self.args.to}", {"error_m": round(float(np.linalg.norm(p - g)), 2)}
         if not visible:
             return False, f"lost sight of {self.args.object} (try look_around)", {}
+        if self.state_name == "verify" and float(np.linalg.norm(p - g)) <= tol:
+            return True, f"pushed {self.args.object} to {self.args.to}", {"error_m": round(float(np.linalg.norm(p - g)), 2)}
+        return self._retry(ctx, "re-planning")
+
+    def _retry(self, ctx: Ctx, why: str):
         self.attempts += 1
-        self._plan_approach(ctx)
+        if self.attempts > 6:
+            return False, f"gave up pushing {self.args.object}: {why}", {}
+        ctx.event("skill_note", f"push: {why}; re-planning (attempt {self.attempts})")
+        self._plan_route(ctx)
         return 0.0, 0.0, None
 
 

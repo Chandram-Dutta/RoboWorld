@@ -1,0 +1,8 @@
+name: visit_crate_then_ball
+instruction: First go next to the blue crate (within 0.6 m), and only then go next to the red ball (within 0.6 m).
+world: ball_room
+success:
+  sequence:
+    - {robot_near: {object: blue_crate, distance: 0.6}}
+    - {robot_near: {object: red_ball, distance: 0.6}}
+time_limit_s: 180

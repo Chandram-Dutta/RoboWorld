@@ -180,39 +180,115 @@ src/roboworld/
   world/     spec.py + library/{worlds,tasks}/*.yaml
   robots/    registry.py + manifests/*.yaml
   mcp/       server.py (builder), robot_server.py (the robot as an MCP server)
-  brain/     brains.py (scripted, OpenAI-compatible), runner.py (episodes, agent CLIs)
-  episode.py, api.py, cli.py, store.py
+  brain/     brains.py (scripted, OpenAI-compatible), baseline.py, registry.py (specs), runner.py
+  episode.py, bench.py, api.py, cli.py, store.py
+examples/harnesses/  a plug-in harness example
 examples/    runnable programs
 tests/       uv run pytest
 ```
 
+## Benchmark: robots × brains × tasks
+
+```bash
+uv run rw tasks                       # 8 tasks, random placements per seed
+uv run rw brains                      # baseline, codex, claude-code, your specs
+uv run rw bench --robots go2,open_duck_mini_v2 --tasks all \
+    --brains baseline,examples/harnesses/explorer.yaml,codex --seeds 3
+```
+
+Each run writes `runs/<bench>/report.html` with three parts:
+- a leaderboard: success, progress, time, tool calls, invalid calls, overclaim
+  rate and tokens
+- a task-by-robot success grid
+- every episode
+
+`results.csv` and `summary.json` hold the same data for your own analysis.
+
+| task | tests |
+|---|---|
+| `find_red_ball` | searching (the ball is somewhere behind the robot) |
+| `push_ball_to_goal` | pushing a rolling object |
+| `box_to_red_area` | pushing a sliding object |
+| `reach_marker_behind_crates` | exploring and detouring (the target is hidden) |
+| `cross_bumpy_ground` | walking robustness |
+| `visit_crate_then_ball` | ordered, multi-step goals |
+| `count_red_balls` | perception and reporting (`finish(answer=…)`) |
+| `avoid_red_zone` | following a constraint (touching the zone fails the task) |
+
+**Honest scoring.**
+- The simulator judges success from ground truth.
+- A brain can claim success with `finish(success=true)`. The report counts how
+  often that claim was wrong (the overclaim rate).
+- Perception only covers what the camera has seen, including walls.
+
+Example: baseline vs. the example harness, same robots and skills, 2 seeds:
+
+| | Go2 | Duck | total |
+|---|---|---|---|
+| `baseline` (rules) | 11/16 | 6/16 | 17/32 |
+| `explorer` (rules + exploration + detours) | 15/16 | 10/16 | 25/32 |
+
+**What changed with the brain (the harness):**
+- avoid red zone: 0/4 → 4/4
+- reach the marker behind the crates: 0/4 → 3/4
+
+**What depends on the body:** the duck falls on the bumps and trips over the box,
+whatever the brain does.
+
+## Write your own harness
+
+A harness is any Python class with
+`async run(session, instructions, prompt, tools, max_turns)`. It drives the robot's
+MCP session, using any model or none. Register it with a spec file:
+
+```yaml
+# my_harness.yaml
+name: my-harness
+type: python
+entry: path/to/my_harness.py:MyHarness   # or package.module:MyHarness
+params: {model: qwen3:4b}
+```
+
+Then `rw bench --brains baseline,my_harness.yaml`. See
+[examples/harnesses/explorer.py](examples/harnesses/explorer.py) for a working
+example.
+
+Other spec types:
+- `openai` (`base_url` + `model`): any OpenAI-compatible endpoint
+- `command`: any agent CLI that speaks MCP
+- `scripted`: a fixed list of tool calls
+
+Phase 4 turns this into a full Harness SDK.
+
 ## Known limits
 
 - Gaits stop gracefully: they finish the current step and decelerate. Expect a few
-  centimetres or degrees of overshoot after an `until` fires. For example, a
-  quadruped turn overshoots about 9° at 0.9 rad/s.
-- Speeds are only tuned inside each gait's `limits` (see `describe_robot`).
-  Validation warns when a command goes outside that range.
-- Worlds are flat rooms with simple shapes for now. Terrain, randomisation and more
-  tasks come in phase 3.
-- `walk_to` and `push` have no obstacle avoidance and don't know where the walls
-  are.
-  - Go2 can push the ball against a wall and then can't get behind it. An LLM
-    brain recovers part of the way: in one test it reached 0.2 progress.
-  - The duck pushes the ball into the goal in about 37 s.
+  centimetres or degrees of overshoot after an `until` fires.
+- Speeds are only tuned inside each gait's `limits`.
+- `walk_to` has deliberately no obstacle avoidance; getting around things is the
+  brain's job. `push` plans its own approach and detours around walls and obstacles
+  it has seen.
+  - If an object is pinned against a wall, `push` says so instead of trying.
+- Physics findings, not bugs:
+  - The duck (no ankle roll, soft servos) falls on 1–1.5 cm bumps.
+  - The duck trips when shoving a box.
+  - Go2 pushes boxes about half the time; they slide off-line.
 
 ## Roadmap
 
 Each phase ends with a demo:
 1. Foundation and RoboLang v0 (done).
-2. Skills, honest perception, episodes, and the robot as an MCP server with
+2. The robot as an MCP server: skills, honest perception, episodes, and
    vendor-neutral brains (done).
-3. Worlds (terrain, rooms, objects), tasks and success checks, sweeps comparing
-   robots × brains × worlds, reports.
-4. Prompt-to-robot design: RoboSpec templates compiled through MjSpec, a servo
-   catalog, design checks, version history, and Optuna CMA-ES refinement.
-5. Web app with the `@mujoco/mujoco` WASM viewer.
-6. Optional:
-   - one-time GPU RL per robot family (`stabilizer: policy`)
-   - buildable parts (build123d) with a parts list
+3. Benchmark: 8 randomised tasks, walls in perception, a sturdier push, `rw bench`
+   reports, plug-in harnesses, overclaim tracking (done).
+4. Harness SDK: a documented interface, helpers (model clients, memory, images),
+   reference harnesses (ReAct, plan-and-execute, reflection), harness metrics, and
+   packaging.
+5. Prompt-to-robot design: RoboSpec templates compiled through MjSpec, a servo
+   catalog, checks, version history, and Optuna. The benchmark judges the designs.
+6. Web app with the `@mujoco/mujoco` WASM viewer.
+7. Optional:
+   - GPU RL policy stabilizer
+   - buildable parts
    - hardware bridges

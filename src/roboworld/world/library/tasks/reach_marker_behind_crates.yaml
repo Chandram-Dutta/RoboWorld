@@ -1,0 +1,7 @@
+name: reach_marker_behind_crates
+instruction: >-
+  There is a yellow marker painted on the floor somewhere behind the row of
+  crates. Go and stand on it. You cannot walk through the crates.
+world: crate_barrier
+success: {robot_in_region: yellow_marker}
+time_limit_s: 180
