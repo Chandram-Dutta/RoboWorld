@@ -1,0 +1,64 @@
+# Open Duck Mini v2: a 42 cm, BDX-style biped with 14 STS3215 servos.
+# Model: Open Duck Playground (sim-to-real tuned MJCF, generated with onshape-to-robot).
+# Hardware design: https://github.com/apirrone/Open_Duck_Mini (Apache-2.0)
+name: open_duck_mini_v2
+source:
+  type: git
+  repo: https://github.com/apirrone/Open_Duck_Playground.git
+  commit: b9be205ac64488c23504ca42e5ec790337adeec3
+  subdir: playground/open_duck_mini_v2/xmls
+  include: [open_duck_mini_v2.xml, assets]
+  model: open_duck_mini_v2.xml
+sim:
+  # The upstream file is tuned for MJX speed (iterations=1); CPU can afford accuracy.
+  iterations: 20
+  ls_iterations: 10
+manifest:
+  kind: biped
+  description: >-
+    Open Duck Mini v2, a 42 cm Disney-BDX-style bipedal duck. 5 servos per leg
+    (hip yaw, hip roll, hip pitch, knee, ankle pitch) and 4 in the neck/head.
+    Position-controlled STS3215 hobby servos (~3.2 Nm). No ankle roll.
+  limbs:
+    left_leg: [left_hip_yaw, left_hip_roll, left_hip_pitch, left_knee, left_ankle]
+    right_leg: [right_hip_yaw, right_hip_roll, right_hip_pitch, right_knee, right_ankle]
+    head: [neck_pitch, head_pitch, head_yaw, head_roll]
+  aliases:
+    neck.pitch: neck_pitch
+    head.pitch: head_pitch
+    head.yaw: head_yaw
+    head.roll: head_roll
+  end_effectors:
+    left_foot: {site: left_foot, limb: left_leg}
+    right_foot: {site: right_foot, limb: right_leg}
+    head: {site: head, limb: head}
+  feet: [left_foot, right_foot]
+  default_pose: home
+  max_joint_speed: 5.0  # STS3215 at 7.4 V is roughly 0.2 s / 60 deg
+  poses:
+    # Upstream "home" keyframe: the crouched stance the duck walks in.
+    home:
+      left_hip_yaw: 0.002
+      left_hip_roll: 0.053
+      left_hip_pitch: -0.63
+      left_knee: 1.368
+      left_ankle: -0.784
+      right_hip_yaw: -0.003
+      right_hip_roll: -0.065
+      right_hip_pitch: 0.635
+      right_knee: 1.379
+      right_ankle: -0.796
+      neck_pitch: 0.0
+      head_pitch: 0.0
+      head_yaw: 0.0
+      head_roll: 0.0
+  gaits:
+    # Tuned by sweeping 48 settings x 6 velocity commands (fwd, fast, turn,
+    # side, back, arc): this set walked all six without a fall.
+    biped_walk:
+      period: 0.5
+      step_height: 0.05
+      double_support: 0.3
+      stabilizer: lipm_zmp
+      params: {tilt_gain: 0.5}
+      limits: {vx: [-0.1, 0.18], vy: [-0.06, 0.06], wz: [-0.6, 0.6]}

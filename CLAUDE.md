@@ -1,0 +1,35 @@
+# RoboWorld: notes for Claude
+
+## Commands
+
+| what | command |
+|---|---|
+| Run the tests (about 5 s) | `uv run pytest -q` |
+| Lint | `uvx ruff check src tests --select F,E9,B --ignore B008` |
+| Run a program | `uv run rw run <robot> <program.yaml>` |
+| Replay a run | `uv run rw view latest` |
+
+## Conventions
+
+- **RoboLang programs speak joint position targets only.**
+  - `sim/servo.py` turns targets into actuator commands: position actuators get the
+    target directly; torque motors get a PD loop on every physics step.
+  - Don't bypass the interpreter's safety layer (clamping and rate limits).
+- **Frames:**
+  - Gait and IK targets are in the base body's local frame. `lang/ik.py` uses a
+    fixed-base copy of the robot (free joint and keyframes deleted).
+  - Pitch is positive when the nose is down (R = Rz·Ry·Rx).
+  - For tilt correction, bipeds use a positive gain (keep the legs vertical in the
+    world) and quadrupeds use a negative gain (level the body by changing leg
+    lengths).
+- **Robot models are fetched, not vendored.**
+  - `rw fetch` does a sparse clone at the pinned commit into `assets/robots/`, which
+    is gitignored.
+  - The Open Duck Playground repo has no license file, so never commit its files.
+- **Tuning sweeps:**
+  - Use `Simulation.run(..., save=False)` so they don't fill `runs/`.
+  - On macOS, multiprocessing needs an `if __name__ == "__main__":` guard.
+- **Library versions are newer than older docs:**
+  - MCP 2.x: `from mcp.server.mcpserver import MCPServer` (FastMCP was renamed).
+  - MuJoCo 3.17: lights use `type=mjLIGHT_DIRECTIONAL`.
+  - Rerun 0.42: `set_time(..., duration=)` and `Scalars.columns`.

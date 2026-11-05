@@ -1,0 +1,20 @@
+# The Phase 1 demo: walk the duck forward 1 m while nodding, then look around.
+robot: open_duck_mini_v2
+name: walk 1 m and nod
+do:
+  - pose: home
+    duration: 0.4
+  - label: walk and nod
+    parallel:
+      - gait: {type: biped_walk, velocity: {vx: 0.12}}
+        until: {any: [{distance_traveled: 1.0}, {timeout: 15}]}
+      - clip:
+          keys: [{t: 0.4, head.pitch: 0.25}, {t: 0.4, head.pitch: -0.15}]
+          repeat: 30
+    race: true
+  - label: look around
+    clip:
+      keys:
+        - {t: 0.6, head.yaw: 0.8}
+        - {t: 1.0, head.yaw: -0.8}
+        - {t: 0.6, head.yaw: 0.0}

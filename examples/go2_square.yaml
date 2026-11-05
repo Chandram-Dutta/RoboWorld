@@ -1,0 +1,11 @@
+# Trot a square: forward 0.8 m, turn left 90 degrees, four times.
+robot: go2
+name: trot a square
+do:
+  - repeat:
+      times: 4
+      do:
+        - gait: {type: quadruped_trot, velocity: {vx: 0.5}}
+          until: {any: [{distance_traveled: 0.8}, {timeout: 6}]}
+        - gait: {type: quadruped_trot, velocity: {wz: 0.9}}
+          until: {any: [{turned: 90}, {timeout: 6}]}

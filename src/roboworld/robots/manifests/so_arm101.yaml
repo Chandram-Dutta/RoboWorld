@@ -1,0 +1,26 @@
+# RobotStudio / Hugging Face SO-101 arm from MuJoCo Menagerie (Apache-2.0).
+name: so_arm101
+source:
+  type: git
+  repo: https://github.com/google-deepmind/mujoco_menagerie.git
+  commit: feadf76d42f8a2162426f7d226a3b539556b3bf5
+  subdir: robotstudio_so101
+  include: [so101.xml, assets, LICENSE]
+  model: so101.xml
+manifest:
+  kind: arm
+  description: >-
+    SO-101, the low-cost 5-DoF + gripper arm used with LeRobot. Six STS3215
+    position servos. Fixed base.
+  limbs:
+    arm: [shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll]
+    gripper: [gripper]
+  aliases:
+    gripper.open: gripper
+  end_effectors:
+    gripper: {site: gripperframe, limb: arm}
+  default_pose: zero
+  max_joint_speed: 5.0
+  poses:
+    gripper_open: {gripper: 1.2}
+    gripper_closed: {gripper: 0.0}

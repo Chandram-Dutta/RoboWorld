@@ -1,0 +1,12 @@
+# SO-101: open the gripper, reach forward and down, close it, lift.
+robot: so_arm101
+name: reach and grab
+do:
+  - pose: {arm.shoulder_lift: -0.6, arm.elbow_flex: 0.9, arm.wrist_flex: 0.6}
+    duration: 1.0
+  - pose: gripper_open
+    duration: 0.4
+  - reach: {effector: gripper, pos: [0.0, 0.0, -0.06], relative: true, duration: 1.0}
+  - pose: gripper_closed
+    duration: 0.5
+  - reach: {effector: gripper, pos: [0.0, 0.0, 0.08], relative: true, duration: 1.0}

@@ -1,0 +1,34 @@
+[project]
+name = "roboworld"
+version = "0.1.0"
+description = "Build robots, move them with RoboLang, and test them in simulated worlds."
+readme = "README.md"
+authors = [
+    { name = "Chandram Dutta", email = "chandramdutta2004@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "anthropic>=2.5.0",
+    "mcp[cli]>=2.3.0",
+    "mink>=1.4.0",
+    "mujoco>=3.17.0",
+    "numpy>=2.5.4",
+    "pillow>=13.0.0",
+    "pydantic>=2.14.2",
+    "pyyaml>=6.0.3",
+    "rerun-sdk>=0.42.0",
+    "typer>=0.27.3",
+]
+
+[project.scripts]
+rw = "roboworld.cli:main"
+roboworld = "roboworld.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.23,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]

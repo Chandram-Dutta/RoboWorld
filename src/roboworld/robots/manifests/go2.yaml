@@ -1,0 +1,39 @@
+# Unitree Go2 quadruped from MuJoCo Menagerie (BSD-3-Clause).
+name: go2
+source:
+  type: git
+  repo: https://github.com/google-deepmind/mujoco_menagerie.git
+  commit: feadf76d42f8a2162426f7d226a3b539556b3bf5
+  subdir: unitree_go2
+  include: [go2.xml, assets, LICENSE]
+  model: go2.xml
+manifest:
+  kind: quadruped
+  description: >-
+    Unitree Go2, a 15 kg quadruped. 3 torque-controlled joints per leg
+    (hip abduction, thigh, calf). Legs are FL, FR, RL, RR.
+  limbs:
+    FL: [FL_hip_joint, FL_thigh_joint, FL_calf_joint]
+    FR: [FR_hip_joint, FR_thigh_joint, FR_calf_joint]
+    RL: [RL_hip_joint, RL_thigh_joint, RL_calf_joint]
+    RR: [RR_hip_joint, RR_thigh_joint, RR_calf_joint]
+  end_effectors:
+    FL_foot: {geom: FL, limb: FL}
+    FR_foot: {geom: FR, limb: FR}
+    RL_foot: {geom: RL, limb: RL}
+    RR_foot: {geom: RR, limb: RR}
+  feet: [FL_foot, FR_foot, RL_foot, RR_foot]
+  default_pose: home
+  max_joint_speed: 15.0
+  joint_gains: {kp: 200.0, kd: 6.0}
+  poses:
+    crouch: {FL_thigh_joint: 1.2, FR_thigh_joint: 1.2, RL_thigh_joint: 1.2, RR_thigh_joint: 1.2,
+             FL_calf_joint: -2.4, FR_calf_joint: -2.4, RL_calf_joint: -2.4, RR_calf_joint: -2.4}
+    stand_tall: {FL_thigh_joint: 0.7, FR_thigh_joint: 0.7, RL_thigh_joint: 0.7, RR_thigh_joint: 0.7,
+                 FL_calf_joint: -1.4, FR_calf_joint: -1.4, RL_calf_joint: -1.4, RR_calf_joint: -1.4}
+  gaits:
+    quadruped_trot:
+      period: 0.4
+      step_height: 0.08
+      duty_factor: 0.6
+      limits: {vx: [-0.5, 0.9], vy: [-0.3, 0.3], wz: [-1.0, 1.0]}

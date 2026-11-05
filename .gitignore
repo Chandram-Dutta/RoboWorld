@@ -1,0 +1,12 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# RoboWorld data
+runs/
+.cache/
+# Robot models are downloaded with `rw fetch` (pinned commits), not vendored.
+assets/robots/
