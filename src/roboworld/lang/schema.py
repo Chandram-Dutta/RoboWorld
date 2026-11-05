@@ -10,6 +10,7 @@ A program is a list of steps. Each step is a dict with exactly one *verb* key:
     repeat    run a block of steps N times
     parallel  run blocks at the same time on different limbs
     do        a plain block of steps (useful inside parallel)
+    skill     run a named, closed-loop skill (walk_to, turn, push, ...) with args
 
 Any step can carry ``until:`` (stop early when a condition becomes true) and
 ``label:`` (shows up in the run's event log). Programs are plain YAML/JSON so
@@ -192,7 +193,12 @@ class BlockStep(_Step):
     do: list[Step] = Field(min_length=1)
 
 
-VERBS = ("pose", "clip", "gait", "reach", "wait", "repeat", "parallel", "do")
+class SkillStep(_Step):
+    skill: str = Field(description="skill name (see the robot's skill list), e.g. walk_to, turn, push")
+    args: dict[str, Any] = Field(default_factory=dict)
+
+
+VERBS = ("pose", "clip", "gait", "reach", "wait", "repeat", "parallel", "do", "skill")
 
 
 def _verb(value: Any) -> str | None:
@@ -200,9 +206,7 @@ def _verb(value: Any) -> str | None:
         present = [v for v in VERBS if v in value]
         return present[0] if len(present) == 1 else None
     for verb in VERBS:
-        if hasattr(value, verb) and type(value).__name__.lower().startswith(
-            {"do": "block"}.get(verb, verb)
-        ):
+        if hasattr(value, verb) and type(value).__name__.lower().startswith({"do": "block"}.get(verb, verb)):
             return verb
     return None
 
@@ -217,6 +221,7 @@ Step = Annotated[
         Annotated[RepeatStep, Tag("repeat")],
         Annotated[ParallelStep, Tag("parallel")],
         Annotated[BlockStep, Tag("do")],
+        Annotated[SkillStep, Tag("skill")],
     ],
     Discriminator(
         _verb,

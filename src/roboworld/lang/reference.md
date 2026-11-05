@@ -25,6 +25,7 @@ do:
 | `repeat` | loop a block | `{times, do: [...]}` |
 | `parallel` | run blocks at once on **different** joints | list of steps; `race: true` ends when the first finishes |
 | `do` | a plain block (handy inside `parallel`) | list of steps |
+| `skill` | run a closed-loop skill (needs a world for perception skills) | `skill: walk_to`, `args: {target: red_ball}` |
 
 Every step also accepts `label:` (shows in the event log) and `until:` (end early).
 
@@ -39,6 +40,28 @@ with joint overrides.
 in progress and settle before the next step runs. Leave optional fields out to use
 the robot's tuned defaults. `body_height` raises (+) or lowers (−) the body.
 `stabilizer: none` disables tilt feedback.
+
+## Skills
+
+Skills are closed-loop behaviours built from the verbs above. They are what an
+LLM brain mostly uses, and programs can call them too:
+
+| skill | args | notes |
+|---|---|---|
+| `stand` | none | back to the default pose |
+| `walk` | `distance` (m, − = back), `speed?` | holds heading |
+| `strafe` | `distance` (m, + = left) | |
+| `turn` | `degrees` (+ = left) | on the spot |
+| `face` | `target` | turn to face a seen object or `[x, y]` |
+| `walk_to` | `target`, `stop_distance?`, `speed?` | steers continuously; reports `blocked` (no obstacle avoidance yet) |
+| `look_around` | none | head sweep and/or turning; reports everything seen |
+| `look_at` | `target` | head if it has one, else turns the body |
+| `push` | `object`, `to` (area name or `[x, y]`) | gets behind the object, lines up, dribbles it, backs off to verify |
+| `play` | `motion` | a saved motion (see `save_motion` on the builder server) |
+
+Perception is honest: skills only know objects the robot has seen through its
+camera. Each skill returns `ok`, a `message` saying why it failed, and the
+robot's pose.
 
 ## Conditions (`until`)
 

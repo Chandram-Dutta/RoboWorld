@@ -68,27 +68,42 @@ class Recorder:
                        fill_mode="solid"),
             static=True,
         )
+        floor = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_GEOM, FLOOR_NAME)
+        static = [g for g in range(m.ngeom) if m.geom_bodyid[g] == 0 and g != floor]
+        data = mujoco.MjData(m)
+        mujoco.mj_forward(m, data)
+        for g in static:  # walls, painted areas, fixed obstacles
+            arch = self._geom_archetype(g)
+            if arch is not None:
+                rec.log(f"world/static/geom_{g}", arch, static=True)
+                rec.log(f"world/static/geom_{g}", rr.Transform3D(translation=data.geom_xpos[g],
+                                                                  mat3x3=data.geom_xmat[g].reshape(3, 3)), static=True)
         for g in self.geoms:
-            path = f"world/robot/geom_{g}"
-            t, size, color = m.geom_type[g], m.geom_size[g], _rgba(m, g)
-            if t == mujoco.mjtGeom.mjGEOM_MESH:
-                verts, faces, normals = _mesh(m, int(m.geom_dataid[g]))
-                arch = rr.Mesh3D(vertex_positions=verts, triangle_indices=faces, vertex_normals=normals,
-                                 albedo_factor=color)
-            elif t == mujoco.mjtGeom.mjGEOM_BOX:
-                arch = rr.Boxes3D(half_sizes=[size], colors=[color], fill_mode="solid")
-            elif t == mujoco.mjtGeom.mjGEOM_SPHERE:
-                arch = rr.Ellipsoids3D(half_sizes=[[size[0]] * 3], colors=[color], fill_mode="solid")
-            elif t == mujoco.mjtGeom.mjGEOM_ELLIPSOID:
-                arch = rr.Ellipsoids3D(half_sizes=[size], colors=[color], fill_mode="solid")
-            elif t == mujoco.mjtGeom.mjGEOM_CAPSULE:
-                arch = rr.Capsules3D(lengths=[2 * size[1]], radii=[size[0]], translations=[[0, 0, -size[1]]],
-                                     colors=[color], fill_mode="solid")
-            elif t == mujoco.mjtGeom.mjGEOM_CYLINDER:
-                arch = rr.Cylinders3D(lengths=[2 * size[1]], radii=[size[0]], colors=[color], fill_mode="solid")
-            else:
-                continue
-            rec.log(path, arch, static=True)
+            arch = self._geom_archetype(g)
+            if arch is not None:
+                rec.log(f"world/robot/geom_{g}", arch, static=True)
+
+    def _geom_archetype(self, g: int) -> object | None:
+        m = self.model
+        t, size, color = m.geom_type[g], m.geom_size[g], _rgba(m, g)
+        if t == mujoco.mjtGeom.mjGEOM_MESH:
+            verts, faces, normals = _mesh(m, int(m.geom_dataid[g]))
+            arch = rr.Mesh3D(vertex_positions=verts, triangle_indices=faces, vertex_normals=normals,
+                             albedo_factor=color)
+        elif t == mujoco.mjtGeom.mjGEOM_BOX:
+            arch = rr.Boxes3D(half_sizes=[size], colors=[color], fill_mode="solid")
+        elif t == mujoco.mjtGeom.mjGEOM_SPHERE:
+            arch = rr.Ellipsoids3D(half_sizes=[[size[0]] * 3], colors=[color], fill_mode="solid")
+        elif t == mujoco.mjtGeom.mjGEOM_ELLIPSOID:
+            arch = rr.Ellipsoids3D(half_sizes=[size], colors=[color], fill_mode="solid")
+        elif t == mujoco.mjtGeom.mjGEOM_CAPSULE:
+            arch = rr.Capsules3D(lengths=[2 * size[1]], radii=[size[0]], translations=[[0, 0, -size[1]]],
+                                 colors=[color], fill_mode="solid")
+        elif t == mujoco.mjtGeom.mjGEOM_CYLINDER:
+            arch = rr.Cylinders3D(lengths=[2 * size[1]], radii=[size[0]], colors=[color], fill_mode="solid")
+        else:
+            return None
+        return arch
 
     def frame(self, data: mujoco.MjData, state: RobotState, targets: np.ndarray) -> None:
         rec = self.rec

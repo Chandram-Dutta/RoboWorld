@@ -1,4 +1,4 @@
-"""Assemble a simulation scene (robot + ground + lights) with MjSpec."""
+"""Assemble a simulation scene (robot + camera + ground + world objects) with MjSpec."""
 
 from __future__ import annotations
 
@@ -6,13 +6,98 @@ import mujoco
 import numpy as np
 
 from roboworld.lang.manifest import Manifest
-from roboworld.robots import load_robot_spec
+from roboworld.robots import load_manifest, load_robot_spec
+from roboworld.world.spec import WorldObject, WorldSpec
 
 FLOOR_NAME = "rw_floor"
+CAMERA_NAME = "robot_cam"
+OBJECT_PREFIX = "w_"
 
 
-def build_scene(robot: str) -> mujoco.MjModel:
+def _camera_frame(spec: mujoco.MjSpec, manifest: Manifest) -> tuple[str, np.ndarray, np.ndarray] | None:
+    """Body, local position and local quaternion for the robot's camera."""
+    cam = manifest.camera
+    if cam is None:
+        return None
+    model = spec.compile()
+    data = mujoco.MjData(model)
+    pose = manifest.pose(manifest.default_pose)
+    for j, v in pose.items():
+        data.qpos[model.jnt_qposadr[mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, j)]] = v
+    mujoco.mj_kinematics(model, data)
+    base_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, manifest.base_body)
+    r_base = data.xmat[base_id].reshape(3, 3)
+    if cam.site:
+        sid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, cam.site)
+        body_id = int(model.site_bodyid[sid])
+        anchor = data.site_xpos[sid]
+    else:
+        body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, cam.body)
+        anchor = data.xpos[body_id]
+    r_body = data.xmat[body_id].reshape(3, 3)
+    # cam.pos is an offset in the base frame (at the default pose), e.g. "10 cm forward".
+    world_pos = anchor + r_base @ np.asarray(cam.pos, dtype=float)
+    local_pos = r_body.T @ (world_pos - data.xpos[body_id])
+    f = r_base @ (np.asarray(cam.look, dtype=float) / np.linalg.norm(cam.look))
+    right = np.cross(f, [0.0, 0.0, 1.0])
+    right /= np.linalg.norm(right)
+    up = np.cross(right, f)
+    r_cam = np.column_stack([right, up, -f])  # MuJoCo cameras look along -z with +y up
+    quat = np.zeros(4)
+    mujoco.mju_mat2Quat(quat, (r_body.T @ r_cam).flatten())
+    name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, body_id)
+    return name, local_pos, quat
+
+
+def _add_object(spec: mujoco.MjSpec, obj: WorldObject) -> None:
+    rgba = list(obj.rgba)
+    x, y = obj.pos[:2]
+    z = obj.pos[2] if len(obj.pos) == 3 else obj.half_height + 0.001
+    quat = [np.cos(np.radians(obj.yaw) / 2), 0, 0, np.sin(np.radians(obj.yaw) / 2)]
+    gtype = {"sphere": mujoco.mjtGeom.mjGEOM_SPHERE, "box": mujoco.mjtGeom.mjGEOM_BOX,
+             "cylinder": mujoco.mjtGeom.mjGEOM_CYLINDER, "region": mujoco.mjtGeom.mjGEOM_BOX}[obj.shape]
+    size = list(obj.size) + [0.0] * (3 - len(obj.size))
+    name = OBJECT_PREFIX + obj.name
+    if obj.shape == "region":
+        spec.worldbody.add_geom(name=name, type=gtype, size=[obj.size[0], obj.size[1], 0.0005],
+                                pos=[x, y, 0.0006], quat=quat, rgba=rgba, contype=0, conaffinity=0, group=0)
+        return
+    kwargs: dict = {"name": name, "type": gtype, "size": size, "rgba": rgba, "group": 0}
+    if obj.shape == "sphere":
+        # Rolling resistance (like a ball on carpet) so a nudged ball doesn't roll away.
+        kwargs.update(condim=6, friction=[obj.friction or 0.8, 0.02, 0.015])
+    else:
+        kwargs.update(condim=3, friction=[obj.friction or 0.8, 0.02, 0.01])
+    if obj.movable:
+        body = spec.worldbody.add_body(name=name, pos=[x, y, z], quat=quat)
+        body.add_freejoint(name=name + "_free")
+        body.add_geom(mass=obj.mass, **kwargs)
+    else:
+        spec.worldbody.add_geom(pos=[x, y, z], quat=quat, **kwargs)
+
+
+def _add_walls(spec: mujoco.MjSpec, world: WorldSpec) -> None:
+    w = world.walls
+    if w is None:
+        return
+    hx, hy = w.half_size
+    t, h = w.thickness / 2, w.height / 2
+    rgba = list(WorldObject(name="_", shape="box", size=[1, 1, 1], pos=[0, 0], color=w.color).rgba)
+    for k, (pos, size) in enumerate([
+        ([hx + t, 0, h], [t, hy + 2 * t, h]), ([-hx - t, 0, h], [t, hy + 2 * t, h]),
+        ([0, hy + t, h], [hx, t, h]), ([0, -hy - t, h], [hx, t, h]),
+    ]):
+        spec.worldbody.add_geom(name=f"{OBJECT_PREFIX}wall{k}", type=mujoco.mjtGeom.mjGEOM_BOX, pos=pos, size=size,
+                                rgba=rgba, group=0)
+
+
+def build_scene(robot: str, world: WorldSpec | None = None) -> mujoco.MjModel:
     spec = load_robot_spec(robot)
+    manifest = load_manifest(robot)
+    mount = _camera_frame(spec, manifest)
+    if mount is not None:
+        body, pos, quat = mount
+        spec.body(body).add_camera(name=CAMERA_NAME, pos=list(pos), quat=list(quat), fovy=manifest.camera.fovy)
     spec.visual.headlight.ambient = [0.35, 0.35, 0.35]
     spec.visual.headlight.diffuse = [0.6, 0.6, 0.6]
     spec.visual.headlight.specular = [0.0, 0.0, 0.0]
@@ -54,6 +139,10 @@ def build_scene(robot: str) -> mujoco.MjModel:
         name="rw_sun", pos=[0, 0, 4], dir=[0.3, 0.2, -1], type=mujoco.mjtLightType.mjLIGHT_DIRECTIONAL,
         diffuse=[0.6, 0.6, 0.6], specular=[0.1, 0.1, 0.1], castshadow=1,
     )
+    if world is not None:
+        _add_walls(spec, world)
+        for obj in world.objects:
+            _add_object(spec, obj)
     return spec.compile()
 
 
@@ -90,14 +179,17 @@ def subtree_bodies(model: mujoco.MjModel, root: int) -> set[int]:
     return ids
 
 
-def place_on_ground(model: mujoco.MjModel, data: mujoco.MjData, manifest: Manifest, clearance: float = 0.002) -> None:
-    """Shift a floating-base robot vertically so its lowest point rests on the floor."""
+def place_on_ground(model: mujoco.MjModel, data: mujoco.MjData, manifest: Manifest, clearance: float = 0.002,
+                    xy: tuple[float, float] = (0.0, 0.0), yaw: float = 0.0) -> None:
+    """Put a floating-base robot at (x, y, yaw) with its lowest point resting on the floor."""
     if not manifest.floating_base:
         mujoco.mj_forward(model, data)
         return
     base = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, manifest.base_body)
     free = int(model.body_jntadr[base])
     adr = int(model.jnt_qposadr[free])
+    data.qpos[adr : adr + 2] = xy
+    data.qpos[adr + 3 : adr + 7] = [np.cos(yaw / 2), 0.0, 0.0, np.sin(yaw / 2)]
     mujoco.mj_forward(model, data)
     z = lowest_point(model, data, subtree_bodies(model, base))
     data.qpos[adr + 2] += clearance - z

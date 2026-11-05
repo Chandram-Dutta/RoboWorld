@@ -10,7 +10,8 @@ control. Trained RL policies are an optional upgrade that plugs into the same
 interface.
 
 ```
-Claude Code / Desktop ──MCP──► roboworld ──► RoboLang interpreter ──► MuJoCo ──► Rerun recording
+builder:  Claude Code / Desktop ──MCP──► rw serve-mcp ──► RoboLang ──► MuJoCo ──► Rerun recording
+brain:    any MCP client (Claude, Codex, Gemini, Ollama…) ──MCP──► rw serve-robot ──► skills ──► robot in a world
 ```
 
 ## Quick start
@@ -43,6 +44,73 @@ sheet, and refines.
 | `simulate` | run it: status, metrics, events, a contact sheet of snapshots |
 | `render_snapshot` | picture of a pose |
 | `list_runs`, `get_run` | past runs |
+
+## Robot brains over MCP (vendor-neutral)
+
+The robot itself is an MCP server. Any MCP client can be its brain, and nothing on
+the robot side depends on one model vendor.
+
+```bash
+uv run rw tasks                                   # find_red_ball, push_ball_to_goal, ...
+uv run rw serve-robot --robot open_duck_mini_v2 --task push_ball_to_goal     # stdio
+uv run rw serve-robot --robot go2 --task find_red_ball --http 8765          # or streamable HTTP
+uv run rw robot-config --robot go2 --task find_red_ball                     # MCP config JSON for any client
+```
+
+The brain only gets what a real robot would have:
+
+| tool | what it does |
+|---|---|
+| `observe` | the robot's pose, every object seen so far (with distance and bearing), and the last action's result |
+| `look` | the head-camera image plus the objects visible right now (ray-cast detector) |
+| `skills` | `stand`, `walk`, `strafe`, `turn`, `face`, `walk_to`, `look_around`, `look_at`, `push`, `play` |
+| `do(skill, args)` | runs a skill and returns ok/failed with a reason |
+| `run(program)` | runs any RoboLang program |
+| `status`, `finish` | episode clock and wrap-up |
+
+The simulator judges success from ground truth; the brain's own claim doesn't
+count.
+
+**Timing modes:**
+- `paused`: the world waits while the brain thinks.
+- `realtime`: the thinking time is simulated before the next action, so slow
+  brains lose time and rolling balls keep rolling.
+
+**Saved results** (in `runs/<id>/`):
+- `result.json`: success, progress, time, tool calls, invalid calls, thinking time
+  and tokens
+- `transcript.jsonl`
+- `recording.rrd`
+- `eye/*.png` camera frames
+
+Run unattended episodes (benchmarks) with any brain:
+
+```bash
+# fixed script (baseline / tests)
+uv run rw episode --robot go2 --task find_red_ball --brain scripted --script examples/brains/find_ball_scripted.yaml
+# any OpenAI-compatible endpoint: Ollama, LM Studio, vLLM, OpenRouter, OpenAI...
+uv run rw episode --robot open_duck_mini_v2 --task push_ball_to_goal --brain openai \
+    --base-url http://localhost:11434/v1 --model qwen3:4b
+# an agent CLI as the brain (it launches the robot server itself from the generated MCP config)
+uv run rw episode --robot go2 --task find_red_ball --brain codex
+uv run rw episode --robot go2 --task find_red_ball --brain claude-code
+uv run rw episode --robot go2 --task find_red_ball --brain cmd --cmd 'my-agent --mcp {mcp_config} {prompt}'
+```
+
+**Interactive Codex.** Register the robot once (one server is one episode; a new
+Codex session starts a fresh one):
+
+```bash
+codex mcp add robot -- /opt/homebrew/bin/uv --directory /path/to/RoboWorld run rw serve-robot \
+    --robot open_duck_mini_v2 --task push_ball_to_goal --brain codex
+```
+
+Then in `~/.codex/config.toml`, under `[mcp_servers.robot]`, set
+`tool_timeout_sec = 900` (long skills take a while). Optionally also set
+`default_tools_approval_mode = "approve"` so robot tools don't ask each time.
+
+**Build to brain:** motions you design with the builder server's `save_motion`
+become playable by the robot's brain through the `play` skill.
 
 ## RoboLang in 20 lines
 
@@ -107,11 +175,13 @@ fast, turn, sideways, backward, arc). The chosen set walks all six without falli
 
 ```
 src/roboworld/
-  lang/      schema.py (RoboLang), manifest.py, interpreter.py, validate.py, ik.py, gaits/
-  sim/       scene.py, servo.py, state.py, runner.py, metrics.py, recorder.py (Rerun), render.py
+  lang/      schema.py (RoboLang), manifest.py, interpreter.py, validate.py, ik.py, gaits/, skills.py
+  sim/       scene.py, servo.py, state.py, runner.py, metrics.py, recorder.py (Rerun), render.py, perception.py
+  world/     spec.py + library/{worlds,tasks}/*.yaml
   robots/    registry.py + manifests/*.yaml
-  mcp/       server.py
-  api.py, cli.py, store.py
+  mcp/       server.py (builder), robot_server.py (the robot as an MCP server)
+  brain/     brains.py (scripted, OpenAI-compatible), runner.py (episodes, agent CLIs)
+  episode.py, api.py, cli.py, store.py
 examples/    runnable programs
 tests/       uv run pytest
 ```
@@ -123,14 +193,20 @@ tests/       uv run pytest
   quadruped turn overshoots about 9° at 0.9 rad/s.
 - Speeds are only tuned inside each gait's `limits` (see `describe_robot`).
   Validation warns when a command goes outside that range.
-- Everything runs on flat ground for now. Worlds and tasks come in phase 3.
+- Worlds are flat rooms with simple shapes for now. Terrain, randomisation and more
+  tasks come in phase 3.
+- `walk_to` and `push` have no obstacle avoidance and don't know where the walls
+  are.
+  - Go2 can push the ball against a wall and then can't get behind it. An LLM
+    brain recovers part of the way: in one test it reached 0.2 progress.
+  - The duck pushes the ball into the goal in about 37 s.
 
 ## Roadmap
 
 Each phase ends with a demo:
 1. Foundation and RoboLang v0 (done).
-2. Skills library and LLM brain harness (Claude / OpenAI-compatible), with camera
-   observations and two timing modes: sim paused while the LLM thinks, or real time.
+2. Skills, honest perception, episodes, and the robot as an MCP server with
+   vendor-neutral brains (done).
 3. Worlds (terrain, rooms, objects), tasks and success checks, sweeps comparing
    robots × brains × worlds, reports.
 4. Prompt-to-robot design: RoboSpec templates compiled through MjSpec, a servo

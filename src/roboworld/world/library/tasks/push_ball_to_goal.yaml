@@ -1,0 +1,5 @@
+name: push_ball_to_goal
+instruction: Push the red ball into the green goal area painted on the floor.
+world: ball_room
+success: {object_in_region: {object: red_ball, region: green_goal}}
+time_limit_s: 180

@@ -76,6 +76,38 @@ def snapshot(robot: str, pose: str | None = None, joints: dict[str, float] | Non
     return img
 
 
+def save_motion(robot: str, name: str, program: str, description: str = "") -> dict[str, Any]:
+    """Validate a RoboLang program and save it as a named motion the robot's brain can `play`."""
+    import re
+
+    import yaml
+
+    from roboworld.lang.skills import motion_dir
+
+    if not re.fullmatch(r"[a-z0-9_]{1,40}", name):
+        return {"ok": False, "error": "name must be 1-40 chars of a-z, 0-9 or _"}
+    parsed, report = check_source(program, load_manifest(robot))
+    if parsed is None or not report.ok:
+        return {"ok": False, "validation": report.as_dict()}
+    data = parsed.model_dump(exclude_none=True)
+    data["robot"] = robot
+    data["name"] = name
+    if description:
+        data["description"] = description
+    d = motion_dir(robot)
+    d.mkdir(parents=True, exist_ok=True)
+    path = d / f"{name}.yaml"
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+    return {"ok": True, "saved": str(path), "warnings": report.warnings,
+            "use_it": f'do("play", {{"motion": "{name}"}}) from the robot server, or `- skill: play` in a program'}
+
+
+def motions(robot: str) -> list[dict[str, str]]:
+    from roboworld.lang.skills import list_motions
+
+    return list_motions(robot)
+
+
 def get_run(run_id: str) -> dict[str, Any]:
     return store.load_run(run_id)
 

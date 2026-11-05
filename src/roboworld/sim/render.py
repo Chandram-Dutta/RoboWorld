@@ -74,6 +74,12 @@ def png_bytes(img: np.ndarray) -> bytes:
     return buf.getvalue()
 
 
+def jpeg_bytes(img: np.ndarray, quality: int = 70) -> bytes:
+    buf = io.BytesIO()
+    Image.fromarray(img).save(buf, format="JPEG", quality=quality)
+    return buf.getvalue()
+
+
 def contact_sheet(images: list[np.ndarray], labels: list[str] | None = None) -> np.ndarray:
     """Tile snapshots horizontally into one image (cheaper for an LLM to look at)."""
     from PIL import ImageDraw

@@ -89,6 +89,8 @@ class GaitController:
         self.claims = [ctx.index[j] for j in joints]
         self.stop_requested = False
         self.done = False
+        self.heading_target: float | None = None  # absolute world yaw to steer to (skills set this)
+        self.yaw_ref = 0.0
 
     def start(self, ctx: Ctx) -> None:  # pragma: no cover - interface
         raise NotImplementedError
@@ -102,11 +104,26 @@ class GaitController:
     def init_heading(self, ctx: Ctx) -> None:
         self.yaw_ref = ctx.state.yaw if ctx.state is not None else 0.0
 
+    def set_command(self, vx: float | None = None, vy: float | None = None, wz: float | None = None) -> None:
+        """Change the velocity command while the gait runs (used by closed-loop skills)."""
+        s = self.settings
+        s.vx = s.vx if vx is None else float(vx)
+        s.vy = s.vy if vy is None else float(vy)
+        s.wz = s.wz if wz is None else float(wz)
+
     def heading_correction(self, ctx: Ctx, wz_cmd: float) -> float:
-        """Integrate the commanded turn rate and return a yaw-rate correction toward it."""
+        """Yaw-rate correction: steer to ``heading_target`` if set, else hold the
+        integrated commanded heading (so the robot walks straight)."""
+        if ctx.state is None:
+            return 0.0
+        if self.heading_target is not None:
+            self.yaw_ref = ctx.state.yaw
+            err = (self.heading_target - ctx.state.yaw + np.pi) % (2 * np.pi) - np.pi
+            rate = self.settings.params.get("turn_rate", 0.5)
+            return float(np.clip(1.5 * err, -rate, rate))
         self.yaw_ref += wz_cmd * ctx.dt
         gain = self.settings.params.get("heading_gain", 1.0)
-        if gain <= 0 or ctx.state is None:
+        if gain <= 0:
             return 0.0
         err = (self.yaw_ref - ctx.state.yaw + np.pi) % (2 * np.pi) - np.pi
         limit = self.settings.params.get("heading_max_rate", 0.3)

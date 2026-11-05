@@ -1,0 +1,30 @@
+on_fall: stop
+do:
+- clip:
+    keys:
+    - t: 0.3
+      joints:
+        head.pitch: 0.3
+    - t: 0.3
+      joints:
+        head.pitch: -0.2
+    repeat: 3
+    ease: min_jerk
+    relative: false
+- clip:
+    keys:
+    - t: 0.4
+      joints:
+        head.roll: 0.3
+    - t: 0.4
+      joints:
+        head.roll: -0.3
+    - t: 0.3
+      joints:
+        head.roll: 0.0
+    repeat: 1
+    ease: min_jerk
+    relative: false
+robot: open_duck_mini_v2
+name: happy_nod
+description: nod three times and wiggle the head

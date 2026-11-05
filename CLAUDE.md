@@ -29,7 +29,18 @@
 - **Tuning sweeps:**
   - Use `Simulation.run(..., save=False)` so they don't fill `runs/`.
   - On macOS, multiprocessing needs an `if __name__ == "__main__":` guard.
+- **Episodes:**
+  - The robot MCP server (`mcp/robot_server.py`) runs all MuJoCo and GL work on one
+    executor thread. Keep it that way: macOS GL contexts are thread-bound.
+  - Perception is honest: skills may only use `Perception.memory`, never ground
+    truth. Ground truth (`Episode._distance`) is only for scoring.
+  - Skills report failures through `Skill.report(ok=False, message)` with a reason
+    an LLM can act on. Don't raise for expected failures.
+  - Tests that spawn the server use `ROBOWORLD_RUNS_DIR`, which
+    `runner.server_env` passes through.
 - **Library versions are newer than older docs:**
   - MCP 2.x: `from mcp.server.mcpserver import MCPServer` (FastMCP was renamed).
   - MuJoCo 3.17: lights use `type=mjLIGHT_DIRECTIONAL`.
   - Rerun 0.42: `set_time(..., duration=)` and `Scalars.columns`.
+  - MCP types are snake_case (`input_schema`, `is_error`, `server_info`).
+  - NumPy 2.5 has no 2-D `np.cross`.

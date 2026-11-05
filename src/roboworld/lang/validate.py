@@ -166,6 +166,18 @@ class _Checker:
                 duration = min(known) if known else None
             else:
                 duration = None if None in durations else max(durations)
+        elif isinstance(step, schema.SkillStep):
+            from roboworld.lang.skills import check_skill, default_gait
+
+            claims, duration = set(), None  # skills end on their own; duration depends on the world
+            try:
+                check_skill(step.skill, step.args, self.m)
+            except ValueError as e:
+                self.r.errors.append(f"{where}: {e}")
+            gait = default_gait(self.m)
+            if gait and step.skill not in ("look_at", "stand", "play"):
+                for f in self.m.feet:
+                    claims |= set(self.m.limbs.get(self.m.end_effectors[f].limb or "", []))
         else:  # pragma: no cover
             raise TypeError(type(step))
         if step.until is not None:

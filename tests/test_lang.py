@@ -86,6 +86,7 @@ class _State:
     """Minimal stand-in for RobotState for interpreter-only tests."""
 
     def __init__(self, n):
+        self.t = 0.0
         self.q = np.zeros(n)
         self.base_pos = np.zeros(3)
         self.base_rot = np.eye(3)

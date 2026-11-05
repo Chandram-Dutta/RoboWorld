@@ -23,7 +23,7 @@ def _default_home() -> Path:
 HOME = Path(os.environ.get("ROBOWORLD_HOME", _default_home())).resolve()
 ASSETS_DIR = HOME / "assets"
 ROBOT_ASSETS_DIR = ASSETS_DIR / "robots"
-RUNS_DIR = HOME / "runs"
+RUNS_DIR = Path(os.environ.get("ROBOWORLD_RUNS_DIR", HOME / "runs")).resolve()
 LIBRARY_DIR = HOME / "library"
 CACHE_DIR = HOME / ".cache"
 MANIFEST_DIR = PACKAGE_DIR / "robots" / "manifests"

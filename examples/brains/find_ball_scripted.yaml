@@ -1,0 +1,5 @@
+# A fixed, non-LLM baseline brain for the find_red_ball task.
+- look: {}
+- do: {skill: look_around}
+- do: {skill: walk_to, args: {target: red_ball}}
+- finish: {summary: walked to the red ball}

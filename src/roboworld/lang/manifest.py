@@ -51,6 +51,20 @@ class EndEffector(BaseModel):
         raise ValueError("end effector has no site, geom or body")
 
 
+class CameraMount(BaseModel):
+    """The robot's eye: mounted on a body (or at a site), looking along ``look``
+    (a direction in the base frame, at the default pose)."""
+
+    body: str | None = None
+    site: str | None = None
+    pos: list[float] = Field(default_factory=lambda: [0.0, 0.0, 0.0])
+    look: list[float] = Field(default_factory=lambda: [1.0, 0.0, -0.3])
+    fovy: float = 60.0
+    width: int = 320
+    height: int = 240
+    max_range: float = 5.0
+
+
 class Manifest(BaseModel):
     robot: str
     kind: RobotKind = "other"
@@ -68,6 +82,8 @@ class Manifest(BaseModel):
     default_pose: str = "zero"
     max_joint_speed: float = 6.0  # rad/s, used to rate-limit targets
     gaits: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    default_gait: str | None = None
+    camera: CameraMount | None = None
 
     # ------------------------------------------------------------------ lookup
     def resolve_joint(self, ref: str) -> str:

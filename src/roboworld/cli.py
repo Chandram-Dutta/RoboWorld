@@ -122,6 +122,85 @@ def snapshot(robot: str, pose: Optional[str] = None, out: Path = Path("snapshot.
     typer.echo(save_png(api.snapshot(robot, pose, azimuth=azimuth), out))
 
 
+@app.command()
+def tasks() -> None:
+    """List tasks (world + instruction) that robots can be dropped into."""
+    from roboworld.world.spec import list_tasks
+
+    for t in list_tasks():
+        world = t.world if isinstance(t.world, str) else t.world.name
+        typer.echo(f"{t.name:<22} world={world:<16} {t.instruction}")
+
+
+@app.command("serve-robot")
+def serve_robot(
+    robot: str = typer.Option(..., help="robot name"),
+    task: str = typer.Option(..., help="task name (rw tasks)"),
+    mode: str = typer.Option("paused", help="paused | realtime"),
+    seed: int = typer.Option(0),
+    run_id: Optional[str] = typer.Option(None, help="results go to runs/<run_id>"),
+    brain: Optional[str] = typer.Option(None, help="label for the brain, recorded in results"),
+    http: Optional[int] = typer.Option(None, help="serve over streamable HTTP on this port instead of stdio"),
+) -> None:
+    """Run a robot episode as an MCP server: any MCP client can be the brain."""
+    from roboworld.mcp.robot_server import create_robot_server
+
+    server = create_robot_server(robot, task, mode=mode, seed=seed, run_id=run_id, brain=brain)
+    if http:
+        server.run("streamable-http", host="127.0.0.1", port=http)
+    else:
+        server.run("stdio")
+
+
+@app.command()
+def episode(
+    robot: str = typer.Option(...),
+    task: str = typer.Option(...),
+    brain: str = typer.Option(..., help="scripted | openai | codex | claude-code | cmd"),
+    script: Optional[Path] = typer.Option(None, help="scripted: YAML list of tool calls"),
+    base_url: str = typer.Option("http://localhost:11434/v1", help="openai: any OpenAI-compatible endpoint"),
+    model: str = typer.Option("qwen3:4b", help="openai: model name"),
+    api_key_env: Optional[str] = typer.Option(None, help="openai: env var holding the API key"),
+    vision: bool = typer.Option(True, help="openai: send camera images to the model"),
+    cmd: Optional[str] = typer.Option(None, help="cmd: agent command with {prompt} and {mcp_config} placeholders"),
+    mode: str = typer.Option("paused", help="paused | realtime"),
+    seed: int = 0,
+    max_turns: int = 40,
+) -> None:
+    """Drop a robot into a task and let a brain (any MCP client) drive it."""
+    import os
+
+    from roboworld.brain import brains, runner
+
+    if brain == "scripted":
+        if not script:
+            raise typer.BadParameter("--script is required for the scripted brain")
+        result = runner.run_episode(robot, task, brains.ScriptedBrain.from_file(str(script)), mode=mode, seed=seed,
+                                    max_turns=max_turns)
+    elif brain == "openai":
+        key = os.environ.get(api_key_env) if api_key_env else None
+        b = brains.OpenAICompatBrain(base_url=base_url, model=model, api_key=key, vision=vision)
+        result = runner.run_episode(robot, task, b, mode=mode, seed=seed, max_turns=max_turns)
+    elif brain in runner.PRESETS or brain == "cmd":
+        command = brain if brain in runner.PRESETS else cmd
+        if not command:
+            raise typer.BadParameter("--cmd is required for the cmd brain")
+        result = runner.run_command_brain(robot, task, command, mode=mode, seed=seed)
+    else:
+        raise typer.BadParameter(f"unknown brain '{brain}'")
+    _print(runner.episode_summary(result))
+
+
+@app.command("robot-config")
+def robot_config(robot: str = typer.Option(...), task: str = typer.Option(...), mode: str = "paused",
+                 seed: int = 0, brain: str = "external") -> None:
+    """Print an MCP config that lets any MCP client (Claude Code, Codex, Cursor...) be the robot's brain."""
+    from roboworld.brain import runner
+
+    run_id = runner.new_episode_id(robot, task)
+    _print(runner.mcp_config(robot, task, mode, seed, run_id, brain))
+
+
 @app.command("serve-mcp")
 def serve_mcp() -> None:
     """Run the MCP server on stdio (for Claude Code / Claude Desktop)."""

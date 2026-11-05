@@ -1,0 +1,6 @@
+# A fixed, non-LLM baseline brain for the push_ball_to_goal task.
+- look: {}
+- do: {skill: push, args: {object: red_ball, to: green_goal}}
+- do: {skill: look_around}
+- do: {skill: push, args: {object: red_ball, to: green_goal}}
+- finish: {summary: pushed the ball}

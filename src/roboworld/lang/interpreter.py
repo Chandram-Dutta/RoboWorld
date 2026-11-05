@@ -48,6 +48,8 @@ class Ctx:
     t: float = 0.0
     state: RobotState | None = None
     events: list[Event] = field(default_factory=list)
+    sense: Any = None  # perception (sim.perception.Perception) when running in a world
+    results: list[dict[str, Any]] = field(default_factory=list)  # skill outcomes
 
     def event(self, kind: str, text: str, **data: Any) -> None:
         self.events.append(Event(self.t, kind, text, data))
@@ -386,6 +388,10 @@ def build(step: Any, ctx: Ctx) -> Action:
         action = Sequence(step.label, [lambda s=s: build(s, ctx) for s in step.do])
     elif isinstance(step, schema.ParallelStep):
         action = Parallel(step.label, [lambda s=s: build(s, ctx) for s in step.parallel], step.race)
+    elif isinstance(step, schema.SkillStep):
+        from roboworld.lang.skills import make_skill
+
+        action = make_skill(step, ctx)
     else:  # pragma: no cover
         raise TypeError(f"unknown step {type(step).__name__}")
     if getattr(step, "until", None) is not None:
@@ -416,7 +422,7 @@ class Interpreter:
         return self.ctx.events
 
     def start(self, state: RobotState, initial_targets: np.ndarray) -> None:
-        self.ctx.t = 0.0
+        self.ctx.t = state.t
         self.ctx.state = state
         self.ctx.targets = initial_targets.copy()
         self.out = initial_targets.copy()

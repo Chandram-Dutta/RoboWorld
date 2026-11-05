@@ -19,6 +19,15 @@ def new_run_dir(robot: str) -> tuple[str, Path]:
     return run_id, run_dir
 
 
+def RUNS_DIR_for(run_id: str) -> Path:  # noqa: N802 - mirrors new_run_dir
+    """Run folder for a caller-chosen id (created if needed)."""
+    if not run_id or "/" in run_id or run_id.startswith("."):
+        raise ValueError(f"bad run id '{run_id}'")
+    run_dir = paths.RUNS_DIR / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    return run_dir
+
+
 def list_runs(limit: int = 20) -> list[dict[str, Any]]:
     if not paths.RUNS_DIR.exists():
         return []
@@ -27,7 +36,7 @@ def list_runs(limit: int = 20) -> list[dict[str, Any]]:
         f = d / "result.json"
         if f.exists():
             data = json.loads(f.read_text())
-            out.append({k: data.get(k) for k in ("run_id", "robot", "status", "program_name")}
+            out.append({k: data.get(k) for k in ("run_id", "robot", "status", "program_name", "task", "brain")}
                        | {"forward_m": data.get("metrics", {}).get("forward_m"),
                           "fell": data.get("metrics", {}).get("fell")})
         if len(out) >= limit:

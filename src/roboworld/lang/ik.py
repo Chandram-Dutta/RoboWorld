@@ -88,6 +88,25 @@ class Kinematics:
         mujoco.mj_comPos(self.model, self.data)
         return self.to_base(self.data.subtree_com[self.base].copy()).pos
 
+    def front_reach(self) -> float:
+        """How far the robot's collision geometry extends in front of the base (default pose), metres."""
+        if not hasattr(self, "_front"):
+            q = np.array([self.manifest.poses[self.manifest.default_pose].get(j, 0.0) for j in self.names])
+            self.data.qpos[:] = self._full_q(q)
+            mujoco.mj_kinematics(self.model, self.data)
+            xmax = 0.0
+            for g in range(self.model.ngeom):
+                if not (self.model.geom_contype[g] or self.model.geom_conaffinity[g]):
+                    continue
+                c, h = self.model.geom_aabb[g, :3], self.model.geom_aabb[g, 3:]
+                for sx in (-1, 1):
+                    for sy in (-1, 1):
+                        for sz in (-1, 1):
+                            pw = self.data.geom_xpos[g] + self.data.geom_xmat[g].reshape(3, 3) @ (c + h * [sx, sy, sz])
+                            xmax = max(xmax, float(self.to_base(pw).pos[0]))
+            self._front = xmax
+        return self._front
+
     def _task(self, effector: str) -> mink.FrameTask:
         if effector not in self._tasks:
             kind, name = self.manifest.end_effectors[effector].frame

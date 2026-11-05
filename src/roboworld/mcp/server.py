@@ -84,6 +84,28 @@ def render_snapshot(robot: str, pose: str | None = None, joints: dict[str, float
 
 
 @server.tool()
+def save_motion(robot: str, name: str, program: str, description: str = "") -> str:
+    """Save a RoboLang program as a named motion (e.g. 'wave', 'happy_dance') in the robot's library.
+    Robot brains can then run it with the `play` skill. Simulate it first to make sure it works."""
+    return _json(api.save_motion(robot, name, program, description))
+
+
+@server.tool()
+def list_motions(robot: str) -> str:
+    """Saved motions for a robot (playable by its brain via the `play` skill)."""
+    return _json(api.motions(robot))
+
+
+@server.tool()
+def list_tasks() -> str:
+    """Tasks (world + instruction) that robots can be dropped into with `rw episode` / `rw serve-robot`."""
+    from roboworld.world.spec import list_tasks as _tasks
+
+    return _json([{"name": t.name, "instruction": t.instruction,
+                   "world": t.world if isinstance(t.world, str) else t.world.name} for t in _tasks()])
+
+
+@server.tool()
 def list_runs(limit: int = 10) -> str:
     """Most recent simulation runs."""
     return _json(api.runs(limit))
