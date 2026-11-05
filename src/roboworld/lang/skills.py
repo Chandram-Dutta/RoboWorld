@@ -412,10 +412,10 @@ class WalkTo(MovingSkill):
     def setup(self, ctx: Ctx) -> None:
         goal, det = self.locate(ctx, self.args.target)
         front = ctx.kin.front_reach()
-        if det is not None and det.flat:
-            default_stop = 0.06  # painted areas: walk onto them
+        if det is None or det.flat:
+            default_stop = 0.08  # a point, or a painted area: walk onto it
         else:
-            default_stop = front + (det.size_m / 2 if det else 0.0) + 0.08
+            default_stop = front + det.size_m / 2 + 0.08  # a solid object: stop just in front of it
         self.stop = self.args.stop_distance or default_stop
         dist = float(np.linalg.norm(goal - ctx.state.base_pos[:2]))
         self.timeout = dist / max(self.mover.speed, 1e-3) * 3 + 10

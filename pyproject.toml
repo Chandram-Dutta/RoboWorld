@@ -8,8 +8,6 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "anthropic>=2.5.0",
-    "httpx>=0.28.1",
     "mcp[cli]>=2.3.0",
     "mink>=1.4.0",
     "mujoco>=3.17.0",

@@ -329,7 +329,8 @@ class Episode:
 
     def status(self) -> dict[str, Any]:
         t0 = self._begin("status", {})
-        return self._end("status", {}, t0, {"task": self.task.instruction, "success": self.success,
+        return self._end("status", {}, t0, {"task": self.task.instruction, "robot": self.robot, "mode": self.mode,
+                                            "time_limit_s": self.task.time_limit_s, "success": self.success,
                                             "tool_calls_so_far": len(self.transcript)})
 
     def finish(self, summary: str = "", success: bool | None = None, answer: str | None = None) -> dict[str, Any]:

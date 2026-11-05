@@ -4,84 +4,78 @@ Plug it in without touching RoboWorld (see explorer.yaml):
 
     uv run rw bench --brains baseline,examples/harnesses/explorer.yaml --tasks all
 
-A harness is any class with ``async run(session, instructions, prompt, tools, max_turns)``
-that drives the robot's MCP session. Subclassing a built-in (here the keyword baseline)
-is the quickest start. An LLM harness would call a model inside ``run``.
+A harness subclasses ``Harness`` and implements ``async run(robot, task)``.
+``robot`` has typed helpers (look, observe, seen, do, run, finish) that talk to
+the robot's MCP server. An LLM harness would call a model inside ``run``.
 """
 
 from __future__ import annotations
 
 import math
 import re
-from dataclasses import dataclass
 
-from roboworld.brain.baseline import KeywordBrain
+from roboworld.brain.baseline import KeywordHarness, match
+from roboworld.harness import Robot, TaskInfo
 
 
-@dataclass
-class ExplorerBrain(KeywordBrain):
-    name: str = "example:explorer"
-    lookouts: tuple = ((1.2, 1.2), (1.2, -1.2), (-1.2, 1.2), (-1.2, -1.2), (0.0, 1.5), (0.0, -1.5))
+class ExplorerHarness(KeywordHarness):
+    name = "example:explorer"
+    lookouts = ((1.2, 1.2), (1.2, -1.2), (-1.2, 1.2), (-1.2, -1.2), (0.0, 1.5), (0.0, -1.5))
 
-    async def _pose(self, session) -> tuple[float, float]:
-        r = (await self._json(session, "observe", {})).get("robot", {})
+    async def pose(self, robot: Robot) -> tuple[float, float]:
+        r = (await robot.observe()).get("robot", {})
         return r.get("x", 0.0), r.get("y", 0.0)
 
-    async def _find(self, session, phrase: str) -> str | None:
+    async def find(self, robot: Robot, phrase: str) -> str | None:
         """Look for something matching phrase, walking to new lookout points if needed."""
-        seen = await self._seen(session)
-        target = self._match(phrase, seen)
-        x, y = await self._pose(session)
+        target = match(phrase, await robot.seen())
+        x, y = await self.pose(robot)
         for lx, ly in sorted(self.lookouts, key=lambda p: math.dist(p, (x, y))):
-            if target:
+            if target or robot.over:
                 return target
-            r = await self._do(session, "walk_to", {"target": [lx, ly]})
-            if r.get("episode", {}).get("over"):
-                return None
-            await self._do(session, "look_around", {})
-            target = self._match(phrase, await self._seen(session))
+            await robot.do("walk_to", target=[lx, ly])
+            await robot.do("look_around")
+            target = match(phrase, await robot.seen())
         return target
 
-    async def _goto(self, session, target: str, avoid: dict | None) -> dict:
-        seen = {o["name"]: o for o in await self._seen(session)}
-        x, y = await self._pose(session)
-        if avoid is not None and target in seen:
+    async def goto(self, robot: Robot, target: str, avoid: dict | None) -> dict:
+        seen = {o["name"]: o for o in await robot.seen()}
+        x, y = await self.pose(robot)
+        if avoid is not None:
             # Go round the no-go zone: a waypoint beside it, on the side closer to us.
             zx, zy = avoid["position"]
-            hx, hy = avoid.get("half_extent", [0.3, 0.3])
+            hy = avoid.get("half_extent", [0.3, 0.3])[1]
             side = 1.0 if y >= zy else -1.0
-            await self._do(session, "walk_to", {"target": [zx, zy + side * (hy + 0.45)]})
-        r = await self._do(session, "walk_to", {"target": target})
-        if r.get("ok") or r.get("episode", {}).get("over") or "blocked" not in r.get("message", ""):
+            await robot.do("walk_to", target=[zx, zy + side * (hy + 0.45)])
+        r = await robot.do("walk_to", target=target)
+        if r.get("ok") or robot.over or "blocked" not in r.get("message", ""):
             return r
         # Blocked: try a detour on either side of the straight line, then go again.
         tx, ty = seen.get(target, {}).get("position", [x, y])
         mx, my, dx, dy = (x + tx) / 2, (y + ty) / 2, tx - x, ty - y
         norm = math.hypot(dx, dy) or 1.0
         for side in (1.0, -1.0):
-            wp = [mx - side * dy / norm * 1.0, my + side * dx / norm * 1.0]
-            await self._do(session, "walk_to", {"target": wp})
-            r = await self._do(session, "walk_to", {"target": target})
-            if r.get("ok") or r.get("episode", {}).get("over"):
+            await robot.do("walk_to", target=[mx - side * dy / norm, my + side * dx / norm])
+            r = await robot.do("walk_to", target=target)
+            if r.get("ok") or robot.over:
                 return r
         return r
 
-    async def run(self, session, instructions, prompt, tools, max_turns) -> None:
-        task = prompt.split("Task:", 1)[-1].split("You have", 1)[0].strip().lower()
-        if re.search(r"how many|push the", task):
-            return await super().run(session, instructions, prompt, tools, max_turns)
-        await self._do(session, "look_around", {})
-        seen = await self._seen(session)
-        avoid = next((o for o in seen if "no-go" in o.get("kind", "")), None)
+    async def run(self, robot: Robot, task: TaskInfo) -> None:
+        text = task.instruction.lower()
+        if re.search(r"how many|push the", text):
+            return await super().run(robot, task)
+        await robot.do("look_around")
+        avoid = next((o for o in await robot.seen() if "no-go" in o.get("kind", "")), None)
         ok, note = False, "nothing to do"
-        for clause in re.split(r"\bthen\b", task):
+        for clause in re.split(r"\bthen\b", text):
             clause = re.sub(r"never .*", "", clause)
-            target = await self._find(session, clause)
+            target = await self.find(robot, clause)
             if target is None:
                 ok, note = False, f"couldn't find anything matching '{clause.strip()}'"
                 break
-            r = await self._goto(session, target, avoid)
+            r = await self.goto(robot, target, avoid)
             ok, note = bool(r.get("ok")), r.get("message", "")
-            if not ok or r.get("episode", {}).get("over"):
+            if not ok or robot.over:
                 break
-        await self._json(session, "finish", {"summary": f"explorer: {note}", "success": ok})
+        await robot.finish(f"explorer: {note}", success=ok)

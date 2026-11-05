@@ -1,0 +1,5 @@
+# Example LLM harness (uses your Codex login via ask(); swap ask() for any model).
+name: llm-example
+type: harness
+harness: examples/harnesses/llm_harness.py:LLMHarness
+params: {max_steps: 12}

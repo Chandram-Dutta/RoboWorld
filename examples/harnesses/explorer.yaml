@@ -1,4 +1,4 @@
-# Plug a custom harness into RoboWorld: a Python class with async run(session, instructions, prompt, tools, max_turns).
+# Plug a custom harness into RoboWorld: a Harness subclass with async run(robot, task).
 name: explorer
-type: python
-entry: examples/harnesses/explorer.py:ExplorerBrain
+type: harness
+harness: examples/harnesses/explorer.py:ExplorerHarness

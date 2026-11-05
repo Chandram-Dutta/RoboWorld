@@ -25,8 +25,8 @@ from roboworld.robots import load_manifest
 from roboworld.world.spec import list_tasks, load_task
 
 FIELDS = ["robot", "task", "brain", "seed", "status", "success", "success_time_s", "progress", "sim_time_s",
-          "wall_time_s", "tool_calls", "invalid_calls", "claimed_success", "overclaimed", "tokens", "model",
-          "run_id", "error"]
+          "wall_time_s", "tool_calls", "invalid_calls", "claimed_success", "overclaimed", "tokens", "cost_usd",
+          "llm_calls", "model", "harness", "run_id", "error"]
 
 
 @dataclass(frozen=True)
@@ -60,7 +60,8 @@ def _row(job: Job, label: str, res: dict[str, Any] | None, error: str | None = N
         "sim_time_s": res.get("sim_time_s"), "wall_time_s": res.get("wall_time_s"),
         "tool_calls": bs.get("tool_calls"), "invalid_calls": bs.get("invalid_calls"),
         "claimed_success": bs.get("claimed_success"), "overclaimed": bool(bs.get("overclaimed")),
-        "tokens": tokens, "model": bs.get("model") or llm.get("model"), "run_id": res.get("run_id"),
+        "tokens": tokens, "cost_usd": llm.get("cost_usd"), "llm_calls": llm.get("llm_calls"),
+        "model": bs.get("model") or llm.get("model"), "harness": llm.get("harness"), "run_id": res.get("run_id"),
         "error": error,
     }
 
@@ -102,6 +103,7 @@ def summarise(rows: list[dict[str, Any]]) -> dict[str, Any]:
         times = [r["success_time_s"] for r in wins if r["success_time_s"] is not None]
         calls = [r["tool_calls"] for r in group if r["tool_calls"] is not None]
         tokens = [r["tokens"] for r in group if r["tokens"]]
+        costs = [r["cost_usd"] for r in group if r.get("cost_usd") is not None]
         return {
             "episodes": n, "successes": len(wins), "success_rate": round(len(wins) / n, 3) if n else 0.0,
             "mean_progress": round(sum(r["progress"] or 0 for r in group) / n, 3) if n else 0.0,
@@ -110,6 +112,8 @@ def summarise(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "invalid_calls": sum(r["invalid_calls"] or 0 for r in group),
             "overclaim_rate": round(sum(r["overclaimed"] for r in claims) / len(claims), 3) if claims else None,
             "mean_tokens": round(sum(tokens) / len(tokens)) if tokens else None,
+            "mean_cost_usd": round(sum(costs) / len(costs), 4) if costs else None,
+            "cost_per_success_usd": round(sum(costs) / len(wins), 4) if costs and wins else None,
             "errors": sum(1 for r in group if r["error"]),
         }
 
@@ -173,6 +177,8 @@ def render_report(meta: dict[str, Any], rows: list[dict[str, Any]], summary: dic
             f"<span class=dim>{a['successes']}/{a['episodes']}</span></td><td>{_pct(a['mean_progress'])}</td>"
             f"<td>{a['mean_success_time_s'] or '–'}</td><td>{a['mean_tool_calls'] or '–'}</td>"
             f"<td>{a['invalid_calls']}</td><td>{_pct(a['overclaim_rate'])}</td><td>{a['mean_tokens'] or '–'}</td>"
+            f"<td>{'$%.4f' % a['mean_cost_usd'] if a['mean_cost_usd'] is not None else '–'}</td>"
+            f"<td>{'$%.4f' % a['cost_per_success_usd'] if a['cost_per_success_usd'] is not None else '–'}</td>"
             f"<td>{a['errors'] or ''}</td></tr>")
     head = "".join(f"<th>{e(t)}</th>" for t in tasks)
     grid = []
@@ -221,7 +227,8 @@ th {{ font-size:12px; color:var(--dim); font-weight:600; }}
 {meta['episodes']} episodes</div>
 <h2>Leaderboard (brains)</h2>
 <div class=wrap><table><tr><th>#</th><th>brain</th><th>success</th><th>progress</th><th>time to success (s)</th>
-<th>tool calls</th><th>invalid calls</th><th>overclaim rate</th><th>tokens/episode</th><th>errors</th></tr>
+<th>tool calls</th><th>invalid calls</th><th>overclaim rate</th><th>tokens/episode</th><th>cost/episode</th>
+<th>cost/success</th><th>errors</th></tr>
 {''.join(lb_rows)}</table></div>
 <p class=dim>Overclaim rate: of the episodes where the brain said it succeeded, how often the simulator disagreed.</p>
 <h2>Success by task</h2>

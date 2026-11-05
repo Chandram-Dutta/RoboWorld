@@ -157,38 +157,30 @@ def serve_robot(
 def episode(
     robot: str = typer.Option(...),
     task: str = typer.Option(...),
-    brain: str = typer.Option(..., help="scripted | openai | codex | claude-code | cmd"),
+    brain: str = typer.Option(..., help="your harness spec .yaml, baseline, codex, claude-code, scripted or cmd"),
     script: Optional[Path] = typer.Option(None, help="scripted: YAML list of tool calls"),
-    base_url: str = typer.Option("http://localhost:11434/v1", help="openai: any OpenAI-compatible endpoint"),
-    model: str = typer.Option("qwen3:4b", help="openai: model name"),
-    api_key_env: Optional[str] = typer.Option(None, help="openai: env var holding the API key"),
-    vision: bool = typer.Option(True, help="openai: send camera images to the model"),
     cmd: Optional[str] = typer.Option(None, help="cmd: agent command with {prompt} and {mcp_config} placeholders"),
     mode: str = typer.Option("paused", help="paused | realtime"),
     seed: int = 0,
     max_turns: int = 40,
 ) -> None:
-    """Drop a robot into a task and let a brain (any MCP client) drive it."""
-    import os
-
-    from roboworld.brain import brains, runner
+    """Drop a robot into a task and let a brain (your harness, or any MCP agent) drive it."""
+    from roboworld.brain import brains, registry, runner
 
     if brain == "scripted":
         if not script:
             raise typer.BadParameter("--script is required for the scripted brain")
-        result = runner.run_episode(robot, task, brains.ScriptedBrain.from_file(str(script)), mode=mode, seed=seed,
-                                    max_turns=max_turns)
-    elif brain == "openai":
-        key = os.environ.get(api_key_env) if api_key_env else None
-        b = brains.OpenAICompatBrain(base_url=base_url, model=model, api_key=key, vision=vision)
-        result = runner.run_episode(robot, task, b, mode=mode, seed=seed, max_turns=max_turns)
-    elif brain in runner.PRESETS or brain == "cmd":
-        command = brain if brain in runner.PRESETS else cmd
-        if not command:
+        resolved = brains.ScriptedBrain.from_file(str(script))
+    elif brain == "cmd":
+        if not cmd:
             raise typer.BadParameter("--cmd is required for the cmd brain")
-        result = runner.run_command_brain(robot, task, command, mode=mode, seed=seed)
+        resolved = registry.CommandBrain(name="cmd", command=cmd)
     else:
-        raise typer.BadParameter(f"unknown brain '{brain}'")
+        resolved = registry.resolve(brain)
+    if isinstance(resolved, registry.CommandBrain):
+        result = runner.run_command_brain(robot, task, resolved.command, mode=mode, seed=seed)
+    else:
+        result = runner.run_episode(robot, task, resolved, mode=mode, seed=seed, max_turns=max_turns)
     _print(runner.episode_summary(result))
 
 
@@ -233,6 +225,106 @@ def brains() -> None:
 
     for b in list_brains():
         typer.echo(f"{b['name']:<18} {b['type']:<10} {b['about']}")
+
+
+harness_app = typer.Typer(help="Build and check your own harness (the brain's control loop).",
+                          no_args_is_help=True)
+app.add_typer(harness_app, name="harness")
+
+HARNESS_TEMPLATE = '''"""{name}: a RoboWorld harness. Edit run(); see docs/harness-sdk.md.
+
+Run it:   uv run rw harness check {spec}
+Bench it: uv run rw bench --brains baseline,{spec}
+"""
+
+from roboworld.harness import Harness, Robot, TaskInfo
+
+
+class {cls}(Harness):
+    name = "{name}"
+
+    def __init__(self, model: str | None = None, max_steps: int = 20):
+        super().__init__()
+        self.model = model  # from the spec's params: use it to call whatever LLM you like
+        self.max_steps = max_steps
+
+    async def run(self, robot: Robot, task: TaskInfo) -> None:
+        # 1. Perceive: scan the room, then read back everything seen so far.
+        await robot.do("look_around")
+        seen = await robot.seen()
+
+        # 2. Decide. Replace this rule with your own logic or a call to your model
+        #    (see examples/harnesses/llm_harness.py for one way to do that).
+        words = task.instruction.lower()
+        target = next((o["name"] for o in seen
+                       if o.get("kind") != "wall" and o["name"].split("_")[0] in words), None)
+
+        # 3. Act with skills (see `await robot.skills()`), and read each result.
+        ok = False
+        if target:
+            result = await robot.do("walk_to", target=target)
+            ok = bool(result.get("ok"))
+
+        # 4. Finish. Only claim success you have checked.
+        #    Anything you put in self.stats (model calls, tokens, cost_usd...) shows up in the results.
+        await robot.finish(f"{name}: went to {{target}}", success=ok)
+'''
+
+SPEC_TEMPLATE = """name: {name}
+type: harness
+harness: {path}:{cls}
+# params are passed to your class's constructor, e.g. which model your harness should call:
+# params: {{max_steps: 20, model: your-model-name}}
+"""
+
+
+@harness_app.command("new")
+def harness_new(name: str, folder: Path = typer.Option(Path("harnesses"), "--dir", help="where to write it")) -> None:
+    """Scaffold a harness: NAME.py (the class) and NAME.yaml (the spec that plugs it in)."""
+    import re
+
+    slug = re.sub(r"[^a-z0-9_]+", "_", name.lower()).strip("_") or "my_harness"
+    cls = "".join(part.capitalize() for part in slug.split("_")) + "Harness"
+    folder.mkdir(parents=True, exist_ok=True)
+    py, spec = folder / f"{slug}.py", folder / f"{slug}.yaml"
+    for f in (py, spec):
+        if f.exists():
+            raise typer.BadParameter(f"{f} already exists")
+    py.write_text(HARNESS_TEMPLATE.format(name=slug, cls=cls, spec=spec))
+    spec.write_text(SPEC_TEMPLATE.format(name=slug, cls=cls, path=py))
+    typer.echo(f"wrote {py}\nwrote {spec}\n\nnext: uv run rw harness check {spec}")
+
+
+@harness_app.command("check")
+def harness_check(
+    spec: str = typer.Argument(..., help="brain spec .yaml (or a brain name)"),
+    robot: str = "go2",
+    task: str = "find_red_ball",
+    seed: int = 0,
+    max_turns: int = 40,
+) -> None:
+    """Run one quick episode with a harness and report whether it behaves."""
+    from roboworld.brain import registry, runner
+
+    brain = registry.resolve(spec)
+    if isinstance(brain, registry.CommandBrain):
+        result = runner.run_command_brain(robot, task, brain.command, seed=seed, record=False)
+    else:
+        result = runner.run_episode(robot, task, brain, seed=seed, max_turns=max_turns, record=False)
+    stats = result.get("brain_stats", {})
+    problems = []
+    if result.get("ended_by") in ("disconnected", "in_progress"):
+        problems.append("the episode wasn't finished cleanly")
+    if (result.get("ended_by") == "brain_finished" and stats.get("summary")
+            and "stopped without calling finish" in stats["summary"]):
+        problems.append("run() returned without calling robot.finish(...) while the episode was still open")
+    if stats.get("invalid_calls"):
+        problems.append(f"{stats['invalid_calls']} invalid tool call(s)")
+    if stats.get("overclaimed"):
+        problems.append("claimed success but the simulator disagrees")
+    _print(runner.episode_summary(result))
+    typer.echo("\n" + ("OK: harness ran cleanly" if not problems else "issues:\n- " + "\n- ".join(problems)))
+    raise typer.Exit(0 if not problems or problems == ["claimed success but the simulator disagrees"] else 1)
 
 
 @app.command("robot-config")

@@ -1,8 +1,13 @@
 # RoboWorld
 
-Build robots, move them with **RoboLang** (a small language LLMs can write), and test
-them in simulated worlds. Think "a suite for making microducks", in many shapes for
-many tasks.
+A toolkit for **building robots** and **testing robot brains**:
+- Build robots and move them with **RoboLang** (a small language LLMs can write).
+- Bring your own brain (your harness, or any MCP agent) and test it in simulated
+  worlds against a benchmark.
+
+Think "a suite for making microducks", in many shapes for many tasks. RoboWorld
+doesn't ship LLM harnesses; it gives you the robot, the worlds and the test bench
+to build and compare yours.
 
 Everything runs on a laptop CPU, including an 8 GB M2 Mac. Robots move without any
 GPU training: RoboLang compiles to inverse kinematics, gait generators and balance
@@ -11,7 +16,7 @@ interface.
 
 ```
 builder:  Claude Code / Desktop ──MCP──► rw serve-mcp ──► RoboLang ──► MuJoCo ──► Rerun recording
-brain:    any MCP client (Claude, Codex, Gemini, Ollama…) ──MCP──► rw serve-robot ──► skills ──► robot in a world
+brain:    your harness, or any MCP agent (Codex, Claude Code…) ──MCP──► rw serve-robot ──► skills ──► robot in a world
 ```
 
 ## Quick start
@@ -86,11 +91,10 @@ count.
 Run unattended episodes (benchmarks) with any brain:
 
 ```bash
+# your harness (see "Bring your own harness" below)
+uv run rw episode --robot go2 --task find_red_ball --brain harnesses/my_harness.yaml
 # fixed script (baseline / tests)
 uv run rw episode --robot go2 --task find_red_ball --brain scripted --script examples/brains/find_ball_scripted.yaml
-# any OpenAI-compatible endpoint: Ollama, LM Studio, vLLM, OpenRouter, OpenAI...
-uv run rw episode --robot open_duck_mini_v2 --task push_ball_to_goal --brain openai \
-    --base-url http://localhost:11434/v1 --model qwen3:4b
 # an agent CLI as the brain (it launches the robot server itself from the generated MCP config)
 uv run rw episode --robot go2 --task find_red_ball --brain codex
 uv run rw episode --robot go2 --task find_red_ball --brain claude-code
@@ -180,9 +184,11 @@ src/roboworld/
   world/     spec.py + library/{worlds,tasks}/*.yaml
   robots/    registry.py + manifests/*.yaml
   mcp/       server.py (builder), robot_server.py (the robot as an MCP server)
-  brain/     brains.py (scripted, OpenAI-compatible), baseline.py, registry.py (specs), runner.py
+  harness/   core.py (Harness, Robot, TaskInfo), adapter.py (runner/bench glue, connect_and_run)
+  brain/     brains.py, baseline.py (rule-based harness), registry.py (specs, entry points), runner.py
   episode.py, bench.py, api.py, cli.py, store.py
-examples/harnesses/  a plug-in harness example
+docs/harness-sdk.md
+examples/harnesses/  example harnesses (rule-based, short LLM loop);  examples/brains/  scripted brains
 examples/    runnable programs
 tests/       uv run pytest
 ```
@@ -235,30 +241,50 @@ Example: baseline vs. the example harness, same robots and skills, 2 seeds:
 **What depends on the body:** the duck falls on the bumps and trips over the box,
 whatever the brain does.
 
-## Write your own harness
+## Bring your own harness
 
-A harness is any Python class with
-`async run(session, instructions, prompt, tools, max_turns)`. It drives the robot's
-MCP session, using any model or none. Register it with a spec file:
+A harness is the control loop around a robot brain. It decides what the model sees,
+when the model is asked, how tool calls run, and when to stop. **You write the
+harness and call whatever model you like**; RoboWorld gives you the interface, the
+plug-in points and the test bench. The full guide is
+[docs/harness-sdk.md](docs/harness-sdk.md).
 
-```yaml
-# my_harness.yaml
-name: my-harness
-type: python
-entry: path/to/my_harness.py:MyHarness   # or package.module:MyHarness
-params: {model: qwen3:4b}
+```bash
+uv run rw harness new my_harness                  # scaffold: harnesses/my_harness.py + .yaml
+uv run rw harness check harnesses/my_harness.yaml # one quick episode + sanity checks
+uv run rw bench --brains baseline,harnesses/my_harness.yaml,codex --tasks all --seeds 3
 ```
 
-Then `rw bench --brains baseline,my_harness.yaml`. See
-[examples/harnesses/explorer.py](examples/harnesses/explorer.py) for a working
-example.
+```python
+from roboworld.harness import Harness, Robot, TaskInfo
 
-Other spec types:
-- `openai` (`base_url` + `model`): any OpenAI-compatible endpoint
-- `command`: any agent CLI that speaks MCP
-- `scripted`: a fixed list of tool calls
+class MyHarness(Harness):
+    name = "my-harness"
 
-Phase 4 turns this into a full Harness SDK.
+    async def run(self, robot: Robot, task: TaskInfo) -> None:
+        await robot.do("look_around")
+        r = await robot.do("walk_to", target="red_ball")
+        await robot.finish("done", success=r.get("ok"))
+```
+
+**What RoboWorld provides:**
+- **`Robot`:** typed helpers over the robot's MCP tools (`look`, `observe`, `seen`,
+  `do`, `run`, `finish`, `call`) and `TaskInfo` (the task, briefing, timing).
+- **Plug-in points:**
+  - spec files (`type: harness`, `params:` for your constructor)
+  - Python entry points (`roboworld.harnesses`)
+  - standalone use via `connect_and_run(url=...)` against `rw serve-robot --http`
+- **Testing:**
+  - `rw harness check` runs one episode and sanity-checks it
+  - `rw bench` compares your harness against the baseline and against agents such
+    as Codex
+  - every episode keeps its transcript and recording
+  - whatever your harness puts in `self.stats` (model calls, tokens, `cost_usd`…)
+    is reported, including cost per success
+- **Examples:**
+  - `examples/harnesses/explorer.py`: rule-based
+  - `examples/harnesses/llm_harness.py`: a short LLM loop; its `ask()` uses the
+    Codex CLI, so swap in your own model
 
 ## Known limits
 
@@ -282,9 +308,9 @@ Each phase ends with a demo:
    vendor-neutral brains (done).
 3. Benchmark: 8 randomised tasks, walls in perception, a sturdier push, `rw bench`
    reports, plug-in harnesses, overclaim tracking (done).
-4. Harness SDK: a documented interface, helpers (model clients, memory, images),
-   reference harnesses (ReAct, plan-and-execute, reflection), harness metrics, and
-   packaging.
+4. Bring-your-own-harness: the `Harness`/`Robot` interface, plug-in points (specs,
+   entry points, standalone), `rw harness new/check`, and harness-reported metrics
+   in the benchmark (done).
 5. Prompt-to-robot design: RoboSpec templates compiled through MjSpec, a servo
    catalog, checks, version history, and Optuna. The benchmark judges the designs.
 6. Web app with the `@mujoco/mujoco` WASM viewer.

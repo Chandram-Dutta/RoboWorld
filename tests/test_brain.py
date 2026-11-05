@@ -1,10 +1,8 @@
 """Phase 2: episodes, honest perception, skills, the robot MCP server and brains."""
 
-import json
 import shutil
 import time
 
-import httpx
 import pytest
 
 from roboworld import paths
@@ -90,44 +88,6 @@ def test_scripted_brain_over_mcp(runs_dir, tmp_path):
                                 run_id="t-scripted")
     assert result["success"], result
     assert (runs_dir / "t-scripted" / "transcript.jsonl").exists()
-
-
-def fake_llm(plan):
-    """An OpenAI-compatible endpoint whose 'model' follows a fixed plan of tool calls."""
-    seen: list[dict] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        body = json.loads(request.content)
-        seen.append(body)
-        assert request.url.path.endswith("/chat/completions")
-        assert {t["function"]["name"] for t in body["tools"]} >= {"observe", "look", "do", "finish"}
-        turn = sum(1 for m in body["messages"] if m["role"] == "assistant")
-        if turn >= len(plan):
-            msg = {"role": "assistant", "content": "done"}
-        else:
-            name, args = plan[turn]
-            msg = {"role": "assistant", "content": None, "tool_calls": [
-                {"id": f"c{turn}", "type": "function", "function": {"name": name, "arguments": json.dumps(args)}}]}
-        return httpx.Response(200, json={"choices": [{"message": msg}],
-                                         "usage": {"prompt_tokens": 100, "completion_tokens": 10}})
-
-    return httpx.MockTransport(handler), seen
-
-
-def test_openai_compatible_brain_over_mcp(runs_dir):
-    plan = [("look", {}), ("do", {"skill": "look_around"}),
-            ("do", {"skill": "walk_to", "args": {"target": "red_ball"}}), ("finish", {"summary": "found it"})]
-    transport, seen = fake_llm(plan)
-    brain = brains.OpenAICompatBrain(base_url="http://fake/v1", model="fake-model", transport=transport)
-    result = runner.run_episode("go2", "find_red_ball", brain, run_id="t-openai")
-    assert result["success"], result
-    llm = result["brain_stats"]["llm"]
-    assert llm["llm_calls"] >= 3 and llm["prompt_tokens"] >= 300
-    # After look(), the camera image was sent to the model as an image part.
-    image_msgs = [m for m in seen[1]["messages"] if m["role"] == "user" and isinstance(m["content"], list)]
-    assert image_msgs and image_msgs[-1]["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
-    # Tool results went back as role=tool messages.
-    assert any(m["role"] == "tool" for m in seen[-1]["messages"])
 
 
 def test_mcp_config_is_client_agnostic():

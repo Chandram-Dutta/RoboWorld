@@ -43,6 +43,14 @@
     and the robot servers get it through `ROBOWORLD_RUNS_DIR`.
   - Skill and task changes should be checked against
     `rw bench --brains baseline` for both robots before and after.
+- **Harnesses:**
+  - RoboWorld is a platform. It does **not** ship or tune LLM harnesses or model
+    clients; users bring their own.
+  - The core is the `Harness`/`Robot` interface, the plug-in points,
+    `rw harness new/check`, and the benchmark.
+  - When a harness does badly, improve the platform side (skills, perception,
+    tasks, metrics).
+  - Old `run(session, …)` brains still work through `registry.as_brain`.
 - **Collision bits:**
   - World geoms use contype 9 / conaffinity 5.
   - Robot "body proxies" (visual meshes of bodies with no collision geometry) use
