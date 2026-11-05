@@ -1,0 +1,192 @@
+---
+title: Building a harness
+description: Write your own robot brain in Python, plug it into RoboWorld and compare it on the benchmark.
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+A **harness** is the control loop around a robot's brain. It decides what the model sees, when the
+model is asked, how its tool calls run, what gets remembered and when to stop. Two harnesses on
+the same model and the same robot can score very differently, so the harness is worth testing on
+its own.
+
+RoboWorld doesn't ship LLM harnesses. **You write the harness and call whatever model you like.**
+RoboWorld gives you the interface, the plug-in points and the test bench.
+
+```text
+your harness ──► Robot (typed helpers) ──MCP──► rw serve-robot ──► skills ──► simulated robot
+```
+
+A harness never touches the simulator directly. It talks to the same robot MCP server an agent
+like Codex would use, so one harness works in `rw episode`, in `rw bench`, and against a server
+you start yourself.
+
+## Create and run a harness
+
+<Steps>
+
+1. Scaffold a harness:
+
+   ```sh
+   uv run rw harness new my_harness
+   ```
+
+   This writes `harnesses/my_harness.py` (the class) and `harnesses/my_harness.yaml` (the spec
+   that plugs it in). Use `--dir` to put them somewhere else.
+
+2. Edit the `run` method (see below).
+
+3. Run one quick episode with sanity checks:
+
+   ```sh
+   uv run rw harness check harnesses/my_harness.yaml
+   ```
+
+4. Compare it with the baseline and with other brains:
+
+   ```sh
+   uv run rw bench --brains baseline,harnesses/my_harness.yaml --tasks all --seeds 3
+   ```
+
+</Steps>
+
+## Write the control loop
+
+A harness subclasses `Harness` and implements `async run(robot, task)`:
+
+```python title="harnesses/my_harness.py"
+from roboworld.harness import Harness, Robot, TaskInfo
+
+
+class MyHarness(Harness):
+    name = "my-harness"
+
+    def __init__(self, model: str = "my-model"):  # arguments come from the spec's params
+        super().__init__()
+        self.model = model
+
+    async def run(self, robot: Robot, task: TaskInfo) -> None:
+        await robot.do("look_around")                 # perceive
+        seen = await robot.seen()
+        target = next((o["name"] for o in seen if "ball" in o["name"]), None)  # decide
+        ok = False
+        if target:
+            result = await robot.do("walk_to", target=target)                 # act
+            ok = bool(result.get("ok"))
+        await robot.finish(f"went to {target}", success=ok)                    # finish
+```
+
+Three rules keep results meaningful:
+
+- **Call `robot.finish(...)` when you are done.** If `run` returns without it, the runner closes
+  the episode for you and `rw harness check` reports it.
+- **Only claim `success=True` when you have checked.** The benchmark reports how often a brain
+  claims a success the simulator didn't confirm.
+- **Read the result of every skill.** Skills fail for real reasons (an object not yet seen, a
+  blocked path) and the `message` says why.
+
+## Call a model
+
+The decision step is where your model goes. A typical loop looks, asks the model for the next
+skill as JSON, runs it and repeats:
+
+```python
+import json
+from roboworld.harness import Harness, Robot, TaskInfo, objects_text
+
+
+class LLMHarness(Harness):
+    name = "llm-loop"
+
+    def __init__(self, max_steps: int = 12):
+        super().__init__()
+        self.max_steps = max_steps
+        self.stats = {"llm_calls": 0}
+
+    async def run(self, robot: Robot, task: TaskInfo) -> None:
+        skills = (await robot.skills())["skills"]
+        menu = "\n".join(f"- {s['name']}({', '.join(s['args'])}): {s['description']}" for s in skills)
+        for _ in range(self.max_steps):
+            image, _ = await robot.look()
+            prompt = (f"Task: {task.instruction}\nSkills:\n{menu}\n"
+                      f"Seen so far:\n{objects_text(await robot.seen())}\n"
+                      'Reply with JSON: {"skill": ..., "args": {...}} or {"done": true, "success": ...}')
+            self.stats["llm_calls"] += 1
+            step = json.loads(await ask(prompt, image))   # ask() calls your model
+            if step.get("done"):
+                await robot.finish("done", success=step.get("success"))
+                return
+            await robot.do(step["skill"], **step.get("args", {}))
+            if robot.over:
+                break
+        if not robot.finished:
+            await robot.finish("out of steps")
+```
+
+`ask()` is yours to write with any model API or CLI. The repository's
+`examples/harnesses/llm_harness.py` is a complete version of this loop; its `ask()` calls the
+Codex CLI. `task.briefing` holds the robot server's own description of the robot, tools,
+coordinates and timing, which makes a good system prompt.
+
+If your model supports function calling, `robot.tools` is the raw MCP tool list and
+`robot.call(name, args)` calls any tool by name.
+
+## Report your own statistics
+
+Anything you put in `self.stats` is saved with the episode and shown in benchmark reports. These
+keys have special meaning:
+
+| Key | Used for |
+|---|---|
+| `llm_calls` | Number of model calls |
+| `prompt_tokens`, `completion_tokens` | Token counts, summed into the report's token column |
+| `cost_usd` | Cost per episode, and cost per success in the report |
+
+## Plug it in
+
+There are three ways to make a harness available.
+
+**A spec file.** Pass its path to `--brain` or `--brains`, or save it as
+`library/brains/<name>.yaml` to use it by name:
+
+```yaml title="harnesses/my_harness.yaml"
+name: my-harness
+type: harness
+harness: harnesses/my_harness.py:MyHarness   # or package.module:MyHarness
+params: {model: my-model}                    # passed to the constructor
+```
+
+**A Python package.** Expose the class under the `roboworld.harnesses` entry-point group. Once the
+package is installed in the same environment, `rw brains` lists it and you can use it by name:
+
+```toml title="pyproject.toml"
+[project.entry-points."roboworld.harnesses"]
+my-harness = "my_package.harness:MyHarness"
+```
+
+**Standalone.** Connect to a robot server you started with `--http`:
+
+```python
+import asyncio
+from roboworld.harness import connect_and_run
+
+asyncio.run(connect_and_run(MyHarness(), url="http://127.0.0.1:8765/mcp"))
+```
+
+## Test it
+
+`rw harness check` runs one episode (by default the Go2 robot on `find_red_ball`) and flags:
+
+- an episode that wasn't finished cleanly,
+- `run()` returning without calling `robot.finish(...)`,
+- invalid tool calls,
+- claims of success that the simulator didn't confirm.
+
+Use `--robot`, `--task` and `--seed` to check other situations. Then compare brains with
+[`rw bench`](/RoboWorld/guides/benchmarking/). Every episode keeps its transcript, the camera images the
+harness looked at and, when recording is on, a Rerun recording.
+
+## Reference
+
+- [Harness API](/RoboWorld/reference/harness-api/): `Harness`, `Robot`, `TaskInfo` and helpers.
+- [Brain specs](/RoboWorld/reference/brain-specs/): every way to name and configure a brain.

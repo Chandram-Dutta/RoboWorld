@@ -1,0 +1,101 @@
+---
+title: Installation
+description: Install RoboWorld from source and download the robot models.
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+RoboWorld is a Python package with a command-line tool called `rw`. It runs on a CPU; no GPU is
+needed.
+
+## Requirements
+
+- **Python 3.12** or newer
+- **[uv](https://docs.astral.sh/uv/)**, which installs the Python dependencies (MuJoCo, mink, Rerun, the MCP SDK and others)
+- **Git**, used by `rw fetch` to download robot models
+- **OpenGL**, for camera images and snapshots (available on any desktop; see the headless note below)
+
+## Install
+
+<Steps>
+
+1. Clone the repository and enter it:
+
+   ```sh
+   git clone https://github.com/Chandram-Dutta/RoboWorld.git
+   cd RoboWorld
+   ```
+
+2. Install the dependencies into a project environment:
+
+   ```sh
+   uv sync
+   ```
+
+3. Download the models of the built-in robots. Each one is fetched from its upstream repository
+   at a pinned commit:
+
+   ```sh
+   uv run rw fetch open_duck_mini_v2
+   uv run rw fetch go2
+   uv run rw fetch so_arm101
+   ```
+
+4. Check that the robots are available:
+
+   ```sh
+   uv run rw robots
+   ```
+
+   ```text
+   go2                    quadruped   ✓
+   open_duck_mini_v2      biped       ✓
+   so_arm101              arm         ✓
+   ```
+
+   A robot whose models haven't been downloaded yet shows `↓ (rw fetch)` instead of `✓`.
+
+</Steps>
+
+## Running commands
+
+Every command in these docs is written as `uv run rw …`, which runs `rw` inside the project
+environment. If you prefer, activate the environment once and call `rw` directly:
+
+```sh
+source .venv/bin/activate
+rw robots
+```
+
+The package also installs the `rerun` viewer, which `rw view` opens to replay runs.
+
+## Robot model licences
+
+Robot models are downloaded, not bundled. They are stored in `assets/robots/` and keep their
+upstream licences. See [Built-in robots, worlds and tasks](/RoboWorld/reference/built-in/) for the source
+of each model.
+
+## Running without a display
+
+On a server without a display, tell MuJoCo to render offscreen through EGL before running
+commands that produce images:
+
+```sh
+export MUJOCO_GL=egl
+```
+
+## Where RoboWorld keeps its files
+
+By default everything lives inside the project folder:
+
+| Folder | Contents |
+|---|---|
+| `assets/robots/` | Downloaded robot models |
+| `runs/` | Results and recordings of every run, episode and benchmark |
+| `library/` | Your own content: designed robots, saved motions, worlds, tasks and brain specs |
+
+You can move these folders with environment variables; see [Configuration](/RoboWorld/reference/configuration/).
+
+## Next steps
+
+Continue with the [quickstart](/RoboWorld/start/quickstart/).

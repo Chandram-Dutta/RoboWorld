@@ -1,0 +1,85 @@
+---
+title: Project structure
+description: Where everything lives in the RoboWorld repository.
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+
+<FileTree>
+
+- src/roboworld/
+  - cli.py the `rw` command line
+  - api.py high-level operations shared by the CLI and the builder server
+  - paths.py folder locations and environment variables
+  - store.py run storage in `runs/`
+  - episode.py one robot in one task: perception, timing, scoring, results
+  - bench.py benchmarks and their reports
+  - robots/
+    - registry.py robot entries, `rw fetch`, model loading
+    - manifests/ entries for the built-in robots
+  - lang/
+    - schema.py the RoboLang schema
+    - validate.py the program validator
+    - interpreter.py runs programs at the control rate, with the safety layer
+    - manifest.py manifest generation and name resolution
+    - ik.py inverse kinematics in the base frame
+    - skills.py closed-loop skills
+    - reference.md the RoboLang reference returned by `rw lang`
+    - gaits/
+      - base.py the gait interface and settings
+      - biped.py `biped_walk`
+      - periodic.py quadruped and hexapod gaits
+  - sim/
+    - runner.py the simulation loop
+    - scene.py builds the scene: robot, camera, floor, world objects
+    - servo.py the servo layer
+    - state.py the robot state read from MuJoCo
+    - metrics.py run metrics
+    - perception.py the object detector and memory
+    - recorder.py Rerun recordings
+    - render.py snapshots
+  - world/
+    - spec.py world and task specs
+    - library/ built-in worlds and tasks
+  - mcp/
+    - robot_server.py the robot MCP server
+    - server.py the builder MCP server
+  - brain/
+    - registry.py brain specs, presets and entry points
+    - runner.py runs episodes with in-process brains and agent CLIs
+    - brains.py brain base classes and the scripted brain
+    - baseline.py the rule-based baseline
+  - harness/
+    - core.py `Harness`, `Robot`, `TaskInfo`
+    - adapter.py runs harnesses as brains; `connect_and_run`
+  - design/
+    - spec.py the robot design spec and change merging
+    - compiler.py compiles a spec into a model and manifest
+    - checks.py design checks
+    - tune.py gait tuning
+    - store.py design storage and history
+    - api.py design operations for the CLI and the builder server
+    - servos.yaml the servo catalog
+    - templates/ design templates
+- tests/ the test suite (`uv run pytest`)
+- examples/
+  - \*.yaml example RoboLang programs
+  - brains/ scripted brains
+  - harnesses/ example harnesses
+- docs/ this documentation site
+- assets/robots/ downloaded robot models (not in git)
+- library/ your own content; designs and robot entries are not in git
+- runs/ results and recordings (not in git)
+
+</FileTree>
+
+## Tests
+
+| File | Covers |
+|---|---|
+| `tests/test_lang.py` | The RoboLang schema, validator, manifests, safety layer and inverse kinematics |
+| `tests/test_sim.py` | Standing, gaits, `until` conditions, fall detection and the simulate API |
+| `tests/test_brain.py` | Perception, skills, episodes, timing modes, saved motions and the robot MCP server |
+| `tests/test_harness.py` | The harness interface, plug-in points, scaffolding and `connect_and_run` |
+| `tests/test_bench.py` | Tasks and worlds, success rules, random placement and benchmark reports |
+| `tests/test_design.py` | Design specs, compilation, checks, history, tuning and comparisons |

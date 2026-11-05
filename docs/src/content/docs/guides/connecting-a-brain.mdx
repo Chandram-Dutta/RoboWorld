@@ -1,0 +1,170 @@
+---
+title: Connecting a brain
+description: Let an MCP agent or your own harness control a robot in a task, interactively or unattended.
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+In RoboWorld, the robot is an MCP server. A **brain** is whatever connects to it and decides what
+the robot does: an agent such as Codex or Claude Code, your own [harness](/RoboWorld/guides/building-a-harness/),
+or the built-in rule-based `baseline`. Nothing on the robot side depends on a particular model
+vendor.
+
+## The robot server
+
+`rw serve-robot` starts one **episode**: one robot, in one task, with one timing mode.
+
+```sh
+uv run rw serve-robot --robot open_duck_mini_v2 --task push_ball_to_goal
+```
+
+It speaks MCP over stdio by default. Add `--http <port>` to serve streamable HTTP on
+`http://127.0.0.1:<port>/mcp` instead, which is useful when you start the brain separately:
+
+```sh
+uv run rw serve-robot --robot go2 --task find_red_ball --http 8765
+```
+
+One server process is one episode. When the brain calls `finish` or disconnects, the episode ends
+and its results are written to `runs/<run_id>/`. Start a new server for the next episode.
+
+The brain gets the robot's senses and skills and nothing else:
+
+| Tool | What it does |
+|---|---|
+| `observe` | The robot's pose, every object seen so far (with distance and bearing) and the last action's result |
+| `look` | The camera image plus the objects visible right now |
+| `skills` | The robot's skills with their arguments, and its saved motions |
+| `do(skill, args)` | Runs a skill and returns `ok` and a message explaining any failure |
+| `run(program)` | Runs a RoboLang program for anything the skills don't cover |
+| `status` | The task, the clock and whether the episode is over |
+| `finish(summary, success, answer)` | Ends the episode |
+
+The [robot MCP server reference](/RoboWorld/reference/robot-server/) has the details.
+
+## Choose a timing mode
+
+| Mode | Behaviour | Measures |
+|---|---|---|
+| `paused` (default) | The world waits while the brain thinks. | Reasoning quality only |
+| `realtime` | Before each tool call, the world catches up by the time the brain spent thinking, with the robot standing still. Rolling balls keep rolling. | Reasoning quality and speed |
+
+Pass `--mode realtime` to `rw serve-robot`, `rw episode` or `rw bench`.
+
+## Drive a robot interactively
+
+Register the robot server with your agent and talk to it. The server tells the agent about the
+robot, the task and the tools when it connects.
+
+<Tabs>
+<TabItem label="Codex">
+
+```sh
+codex mcp add robot -- uv --directory /path/to/RoboWorld run rw serve-robot \
+    --robot open_duck_mini_v2 --task push_ball_to_goal --brain codex
+```
+
+Long skills can take minutes, so raise the tool timeout in `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.robot]
+tool_timeout_sec = 900
+```
+
+</TabItem>
+<TabItem label="Claude Code">
+
+```sh
+claude mcp add robot -- uv --directory /path/to/RoboWorld run rw serve-robot \
+    --robot open_duck_mini_v2 --task push_ball_to_goal --brain claude-code
+```
+
+</TabItem>
+<TabItem label="Other clients">
+
+`rw robot-config` prints a ready-made MCP configuration for one episode:
+
+```sh
+uv run rw robot-config --robot go2 --task find_red_ball
+```
+
+```json
+{
+  "mcpServers": {
+    "robot": {
+      "command": "/path/to/RoboWorld/.venv/bin/python",
+      "args": ["-m", "roboworld.cli", "serve-robot", "--robot", "go2", "--task", "find_red_ball",
+               "--mode", "paused", "--seed", "0", "--run-id", "20261105-181608-go2-find_red_ball-2e39",
+               "--brain", "external", "--record"],
+      "cwd": "/path/to/RoboWorld",
+      "env": {
+        "ROBOWORLD_RUNS_DIR": "/path/to/RoboWorld/runs",
+        "ROBOWORLD_HOME": "/path/to/RoboWorld",
+        "ROBOWORLD_LIBRARY_DIR": "/path/to/RoboWorld/library"
+      }
+    }
+  }
+}
+```
+
+The configuration fixes the run ID, so generate a new one for each episode.
+
+</TabItem>
+</Tabs>
+
+Each new agent session starts a fresh robot server, and therefore a fresh episode. The `--brain`
+value is only a label recorded in the results.
+
+## Run episodes unattended
+
+`rw episode` starts the robot server, runs a brain against it and prints a summary of the result.
+
+```sh
+# your own harness, from its spec file
+uv run rw episode --robot go2 --task find_red_ball --brain harnesses/my_harness.yaml
+
+# the built-in rule-based baseline
+uv run rw episode --robot go2 --task find_red_ball --brain baseline
+
+# an agent CLI; it launches the robot server itself from a generated MCP configuration
+uv run rw episode --robot go2 --task find_red_ball --brain codex
+uv run rw episode --robot go2 --task find_red_ball --brain claude-code
+
+# any other agent command
+uv run rw episode --robot go2 --task find_red_ball --brain cmd \
+    --cmd 'my-agent --mcp {mcp_config} {prompt}'
+
+# a fixed list of tool calls, for tests
+uv run rw episode --robot go2 --task find_red_ball --brain scripted \
+    --script examples/brains/find_ball_scripted.yaml
+```
+
+For `cmd`, RoboWorld fills in these placeholders:
+
+| Placeholder | Value |
+|---|---|
+| `{prompt}` | The task prompt |
+| `{mcp_config}` | Path to an MCP configuration file for this episode's robot server |
+| `{run_dir}` | The episode's results folder |
+| `{run_id}` | The episode's run ID |
+| `{codex_flags}` | The same server configuration as Codex `-c` flags |
+
+Other options: `--seed` picks the random placement of objects, `--mode` sets the timing mode, and
+`--max-turns` (default 40) caps the number of turns for in-process brains.
+
+## Connect a harness to a running server
+
+A harness can also connect to a server you started with `--http`:
+
+```python
+import asyncio
+from roboworld.harness import connect_and_run
+
+asyncio.run(connect_and_run(MyHarness(), url="http://127.0.0.1:8765/mcp"))
+```
+
+## Read the results
+
+Each episode leaves `result.json`, `transcript.jsonl`, the camera images the brain looked at and,
+when recording is on, a Rerun recording. Replay it with `rw view <run_id>`. See
+[Episodes and scoring](/RoboWorld/concepts/episodes-and-scoring/) for how success and progress are judged.

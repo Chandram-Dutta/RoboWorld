@@ -1,0 +1,213 @@
+---
+title: Designing robots
+description: Create robots from templates, change them, check them, tune their gaits and compare them.
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+RoboWorld describes a robot in a few numbers: body size and mass, legs, servos and a head with a
+camera. This description is called a **robot design spec**. RoboWorld compiles a spec into a
+MuJoCo model plus a manifest, so a designed robot works straight away with every gait, skill,
+task, robot server and benchmark.
+
+You, or the assistant you design with, decide what to change. RoboWorld compiles, checks, records
+the history and compares.
+
+## The design loop
+
+<Steps>
+
+1. **Create** a robot from a template.
+2. **Check** that it stands, walks and turns.
+3. **Derive** variations with small changes. Each keeps a link to its parent.
+4. **Tune** its gait on a test course.
+5. **Compare** designs under the same brain on real tasks.
+
+</Steps>
+
+## Start from a template
+
+```sh
+uv run rw design templates
+```
+
+```text
+duck       A small duck-style biped in the spirit of Open Duck Mini: 5-DoF legs (hip yaw/roll/pitch, knee, ankle pitch), a 2-DoF neck with a camera, STS3215 servos, about 2 kg.
+hexapod    A six-legged walker: 3-DoF legs on light XL330 servos, tripod gait, fixed front camera, about 1.3 kg. Very stable; slow.
+mini_dog   A small hobby-servo quadruped: 3-DoF legs (abduction, hip, knee) with backward knees and ball feet, a fixed head camera, STS3215 servos, about 2 kg.
+```
+
+Create a robot. RoboWorld compiles it and runs its checks:
+
+```sh
+uv run rw design new duck1 --template duck
+```
+
+```text
+created duck1 (digest f8d8e5c1e66b)
+
+check: pass
+  pass mass               total mass 1.78 kg
+  pass standing_height    torso stands 0.221 m high after settling
+  pass home_pose_in_range all joints inside their range
+  pass parts_overlap      no intersecting parts
+  pass stands             stands still for 2 s
+  pass standing_torque    peak servo load while standing is 7% of the torque limit (aim for < 60%)
+  pass sag                body sinks 0.3 mm while standing (aim for < 11.1 mm)
+  pass walks              walked 0.64 m in 5 s at 0.15 m/s command
+  pass walk_straightness  heading drifts 1.1° while walking straight (aim for < 15°)
+  info walking_effort     average servo effort while walking is 21% of the torque limit, ...
+  pass turns              turned 168° in 5 s at 0.51 rad/s (aim for > 45°)
+```
+
+Names use lower-case letters, digits and underscores, and must start with a letter. The names of
+built-in robots are reserved, and an existing design is never overwritten.
+
+The [robot design spec reference](/RoboWorld/reference/robot-design-spec/#design-checks) explains each check
+and its thresholds.
+
+## Describe changes
+
+Pass changes with `--set key=value` (repeatable) or as a YAML mapping with `--changes`. Values are
+read as YAML, so numbers, lists and strings all work.
+
+| Form | Example | Effect |
+|---|---|---|
+| Dotted key | `--set body.mass=1.4` | Sets one field |
+| Every leg | `--set all_legs.thigh=0.1` | Applies to all legs |
+| One leg by name | `--changes "{legs: {left_leg: {foot: [0.12, 0.06]}}}"` | Edits that leg only |
+| Whole leg list | `--changes "{legs: [...]}"` | Replaces all legs |
+
+```sh
+uv run rw design new tall_duck --template duck --set all_legs.thigh=0.1 --set all_legs.shin=0.1 \
+    --note "longer legs"
+```
+
+`--note` records why you made the change. `--no-check` skips the checks, which is faster when you
+create many designs in a script.
+
+The servo catalog lists the servos a leg or head can use:
+
+```sh
+uv run rw design servos
+```
+
+```text
+sts3215   3.0 N·m   5.2 rad/s   65 g  Feetech 12 V, used in Open Duck Mini and SO-101
+sts3250   5.0 N·m   4.0 rad/s   80 g  Feetech high-torque
+xl330     0.6 N·m   9.6 rad/s   22 g  Dynamixel, light and fast
+xm430     4.1 N·m   4.8 rad/s   95 g  Dynamixel mid-size
+mg996r    1.0 N·m   7.0 rad/s   60 g  cheap analog metal-gear
+```
+
+## Derive variations
+
+`derive` makes a child design from an existing one:
+
+```sh
+uv run rw design derive duck1 duck2 --set all_legs.dof=biped6 --set "all_legs.foot=[0.13, 0.07]" \
+    --note "ankle roll and bigger feet"
+```
+
+Inspect designs and their lineage:
+
+```sh
+uv run rw design list            # every design, its parent, last check result and note
+uv run rw design show duck2      # the full spec and history information
+uv run rw design history duck2   # duck2 and its ancestors, newest first
+uv run rw design check duck2     # run the checks again
+```
+
+```text
+$ uv run rw design list
+duck1                  parent=-                  pass         from template duck
+duck2                  parent=duck1              pass         ankle roll and bigger feet
+```
+
+`rw design check` also works on built-in robots and robots you have added yourself.
+
+## Use a design
+
+A design is a robot like any other:
+
+```sh
+uv run rw describe duck2
+uv run rw snapshot duck2 --pose home --out duck2.png
+uv run rw run duck2 my_program.yaml
+uv run rw episode --robot duck2 --task find_red_ball --brain baseline
+```
+
+## Tune the gait
+
+`rw design tune` searches the design's gait settings on a test course and saves the best settings
+as a child design:
+
+```sh
+uv run rw design tune duck2 --course bumpy --trials 24 --as duck3
+```
+
+```text
+bumpy: 0.668 m -> 0.885 m over 24 trials
+best: {'period': 0.9136, 'step_height': 0.091, 'double_support': 0.3661, 'tilt_gain': 0.5679, 'speed': 1.0}
+saved as: duck3
+```
+
+How the search works:
+
+- **Course:** `flat` ground, or `bumpy` (the `bumpy_field` world).
+- **Score:** how far the robot walks straight ahead in 8 seconds, averaged over two seeds, minus
+  0.5 m if it falls.
+- **Search:** half the trials sample settings at random; the rest refine around the best so far.
+  Trials run in parallel on several CPU cores.
+- **Settings searched:** gait period, step height, double support (bipeds) or duty factor (other
+  robots), the tilt-correction gain, and the walking speed as a fraction of the robot's limit.
+
+The child design (named `<design>_tuned_<course>` unless you pass `--as`) is saved only if it beats
+the current settings. Its note records the before and after scores.
+
+:::note
+The tuning score measures straight-line walking on one course. Check the result on the tasks you
+care about with `rw design compare`; settings that help on one course can cost performance
+elsewhere.
+:::
+
+## Compare designs
+
+`rw design compare` drives several robots with the same brain, on the same tasks and seeds, so the
+differences come from the bodies:
+
+```sh
+uv run rw design compare open_duck_mini_v2 duck1 duck3 \
+    --tasks find_red_ball,push_ball_to_goal,cross_bumpy_ground --seeds 3
+```
+
+```text
+duck1                  6/9 (67%)  {'cross_bumpy_ground': '0/3', 'find_red_ball': '3/3', 'push_ball_to_goal': '3/3'}
+...
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--tasks` | `all` | Comma-separated tasks, or `all` |
+| `--seeds` | `2` | Random placements per task |
+| `--brain` | `baseline` | The brain that drives every robot |
+| `--jobs` | `3` | Episodes run in parallel |
+
+The command also writes a full [benchmark report](/RoboWorld/guides/benchmarking/#read-the-report).
+
+## Where designs are stored
+
+| Path | Contents |
+|---|---|
+| `library/designs/<name>/spec.yaml` | The design spec |
+| `library/designs/<name>/robot.xml` | The compiled MuJoCo model |
+| `library/designs/<name>/meta.json` | Parent, template, note, digest, creation time and the last check report |
+| `library/robots/<name>.yaml` | The registry entry that makes the design available as a robot |
+
+Designs are your own content. They are not part of the RoboWorld repository.
+
+## Design with an assistant
+
+The [builder MCP server](/RoboWorld/guides/builder-mcp/#design-a-robot) offers the same operations as tools
+(`design_robot`, `derive_robot`, `check_design`, `tune_design`, `compare_designs` and others), so an
+AI assistant can run the design loop for you.

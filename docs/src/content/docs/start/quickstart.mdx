@@ -1,0 +1,117 @@
+---
+title: Quickstart
+description: Run a motion program, replay it, drop a robot into a task and run a small benchmark.
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+This walkthrough takes about five minutes. It assumes you have [installed RoboWorld](/RoboWorld/start/installation/)
+and fetched the built-in robots.
+
+<Steps>
+
+1. **Run a motion program.** The repository includes a few example programs. This one walks the
+   Open Duck forward one metre while it nods, then looks left and right:
+
+   ```yaml title="examples/duck_walk_and_nod.yaml"
+   robot: open_duck_mini_v2
+   name: walk 1 m and nod
+   do:
+     - pose: home
+       duration: 0.4
+     - label: walk and nod
+       parallel:
+         - gait: {type: biped_walk, velocity: {vx: 0.12}}
+           until: {any: [{distance_traveled: 1.0}, {timeout: 15}]}
+         - clip:
+             keys: [{t: 0.4, head.pitch: 0.25}, {t: 0.4, head.pitch: -0.15}]
+             repeat: 30
+       race: true
+     - label: look around
+       clip:
+         keys:
+           - {t: 0.6, head.yaw: 0.8}
+           - {t: 1.0, head.yaw: -0.8}
+           - {t: 0.6, head.yaw: 0.0}
+   ```
+
+   Simulate it:
+
+   ```sh
+   uv run rw run open_duck_mini_v2 examples/duck_walk_and_nod.yaml
+   ```
+
+   `rw run` prints the result as JSON: the status, metrics such as distance walked and heading
+   drift, and a log of events.
+
+   ```json
+   {
+     "run_id": "20261105-180832-open_duck_mini_v2-1a5c",
+     "robot": "open_duck_mini_v2",
+     "status": "completed",
+     "metrics": {
+       "fell": false,
+       "forward_m": 0.96,
+       "lateral_drift_m": -0.059,
+       "heading_change_deg": -0.9,
+       "max_tilt_deg": 14.1
+     }
+   }
+   ```
+
+   The output above is shortened. [Results and metrics](/RoboWorld/reference/results/) lists every field.
+
+2. **Replay the run.** Open the most recent recording in the Rerun viewer:
+
+   ```sh
+   uv run rw view latest
+   ```
+
+   You get the 3D scene, joint angle and torque plots, the body's height and tilt, and the event
+   log on one timeline. Add `--web` to open it in a browser instead.
+
+3. **Drop a robot into a task.** List the available tasks, then let the built-in `baseline`
+   brain try to find the red ball with the Go2 quadruped:
+
+   ```sh
+   uv run rw tasks
+   uv run rw episode --robot go2 --task find_red_ball --brain baseline
+   ```
+
+   The result tells you whether the task succeeded, how long it took and how the brain behaved:
+
+   ```json
+   {
+     "task": "find_red_ball",
+     "brain": "baseline:keyword",
+     "status": "success",
+     "success_time_s": 19.1,
+     "brain_stats": {
+       "tool_calls": 5,
+       "invalid_calls": 0,
+       "skills_used": {"look_around": 1, "walk_to": 1},
+       "claimed_success": true,
+       "overclaimed": false
+     }
+   }
+   ```
+
+   The baseline is a simple rule-based brain with no LLM. It is the reference point your own
+   brains are compared against.
+
+4. **Run a small benchmark.** Run the baseline on two tasks with two random placements each:
+
+   ```sh
+   uv run rw bench --robots go2 --tasks find_red_ball,push_ball_to_goal --brains baseline --seeds 2
+   ```
+
+   When it finishes, `rw bench` prints a leaderboard and the path of an HTML report in `runs/`.
+
+</Steps>
+
+## Next steps
+
+- Write your own motions: [Writing motion programs](/RoboWorld/guides/motion-programs/).
+- Let an agent or your own harness drive the robot: [Connecting a brain](/RoboWorld/guides/connecting-a-brain/)
+  and [Building a harness](/RoboWorld/guides/building-a-harness/).
+- Design a new robot: [Designing robots](/RoboWorld/guides/designing-robots/).

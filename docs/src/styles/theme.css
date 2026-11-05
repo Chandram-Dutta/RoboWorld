@@ -1,0 +1,12 @@
+/* RoboWorld accent colours (teal). Dark theme is the default; light overrides below. */
+:root {
+	--sl-color-accent-low: #0b3b37;
+	--sl-color-accent: #14b8a6;
+	--sl-color-accent-high: #b4f1e6;
+}
+
+:root[data-theme='light'] {
+	--sl-color-accent-low: #ccf5ee;
+	--sl-color-accent: #0f766e;
+	--sl-color-accent-high: #0b3b37;
+}

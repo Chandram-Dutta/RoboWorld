@@ -1,0 +1,60 @@
+---
+title: RoboWorld
+description: Build robots, control them with RoboLang, and test robot brains in simulated worlds.
+template: splash
+hero:
+  tagline: Build robots, control them with a language LLMs can write, and measure how well a robot brain performs in simulated worlds.
+  actions:
+    - text: Get started
+      link: /RoboWorld/start/quickstart/
+      icon: right-arrow
+    - text: How it works
+      link: /RoboWorld/concepts/architecture/
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+<CardGrid>
+	<Card title="Build robots" icon="puzzle">
+		Start from a template, change it in a few numbers, and let RoboWorld compile, check and
+		version the design. Or bring your own MJCF model.
+	</Card>
+	<Card title="Control them with RoboLang" icon="pencil">
+		A small, typed YAML language for poses, keyframes, gaits and closed-loop skills. Robots
+		walk without any training: motion compiles to inverse kinematics and balance control.
+	</Card>
+	<Card title="Plug in any brain" icon="random">
+		The robot is an MCP server. Your own harness, an agent CLI or any MCP client can drive it,
+		with no dependency on one model vendor.
+	</Card>
+	<Card title="Measure honestly" icon="approve-check">
+		Brains only see what the robot's camera has seen. The simulator judges success from ground
+		truth and reports when a brain claims a success that didn't happen.
+	</Card>
+</CardGrid>
+
+## Choose your path
+
+<CardGrid>
+	<LinkCard
+		title="Write robot motions"
+		description="Make a robot walk, nod and reach with RoboLang, then replay the run."
+		href="/RoboWorld/guides/motion-programs/"
+	/>
+	<LinkCard
+		title="Test a robot brain"
+		description="Connect an agent or your own harness to a robot and benchmark it."
+		href="/RoboWorld/guides/connecting-a-brain/"
+	/>
+	<LinkCard
+		title="Design a robot"
+		description="Create, check, tune and compare robot bodies."
+		href="/RoboWorld/guides/designing-robots/"
+	/>
+	<LinkCard
+		title="Contribute"
+		description="Set up a development environment and extend RoboWorld."
+		href="/RoboWorld/contributing/overview/"
+	/>
+</CardGrid>
