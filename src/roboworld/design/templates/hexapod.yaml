@@ -1,0 +1,14 @@
+name: hexapod
+kind: hexapod
+description: >-
+  A six-legged walker: 3-DoF legs on light XL330 servos, tripod gait, fixed front camera,
+  about 1.3 kg. Very stable; slow.
+body: {size: [0.26, 0.14, 0.05], mass: 0.8, color: white}
+legs:
+  - {name: L1, mount: [ 0.10,  0.075, 0.0], dof: quad3, thigh: 0.07, shin: 0.09, foot: [0.012], knee: backward, stance: 0.75, servo: xl330, segment_mass: 0.03}
+  - {name: L2, mount: [ 0.00,  0.075, 0.0], dof: quad3, thigh: 0.07, shin: 0.09, foot: [0.012], knee: backward, stance: 0.75, servo: xl330, segment_mass: 0.03}
+  - {name: L3, mount: [-0.10,  0.075, 0.0], dof: quad3, thigh: 0.07, shin: 0.09, foot: [0.012], knee: backward, stance: 0.75, servo: xl330, segment_mass: 0.03}
+  - {name: R1, mount: [ 0.10, -0.075, 0.0], dof: quad3, thigh: 0.07, shin: 0.09, foot: [0.012], knee: backward, stance: 0.75, servo: xl330, segment_mass: 0.03}
+  - {name: R2, mount: [ 0.00, -0.075, 0.0], dof: quad3, thigh: 0.07, shin: 0.09, foot: [0.012], knee: backward, stance: 0.75, servo: xl330, segment_mass: 0.03}
+  - {name: R3, mount: [-0.10, -0.075, 0.0], dof: quad3, thigh: 0.07, shin: 0.09, foot: [0.012], knee: backward, stance: 0.75, servo: xl330, segment_mass: 0.03}
+head: {size: [0.05, 0.07, 0.04], mount: [0.14, 0.0, 0.01], neck: 0.0, dof: fixed, camera_look: [1.0, 0.0, -0.5], camera_fovy: 80}

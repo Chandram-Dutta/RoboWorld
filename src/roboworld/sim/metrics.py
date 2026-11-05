@@ -19,6 +19,7 @@ class Metrics:
         self.ticks = 0
         self.sat = 0
         self.peak_ratio = 0.0
+        self.load_sum = 0.0
         self.track_sq = 0.0
         self.tilt_sum = 0.0
         self.max_tilt = 0.0
@@ -42,6 +43,7 @@ class Metrics:
         ratio = np.abs(st.torque) / self.limit
         if np.any(np.isfinite(ratio)):
             self.peak_ratio = max(self.peak_ratio, float(np.nanmax(ratio)))
+            self.load_sum += float(np.nanmean(np.clip(ratio, 0, 1)))
             self.sat += int(np.nansum(ratio >= 0.95))
         self.track_sq += float(np.mean((targets - st.q) ** 2))
         tilt = float(np.degrees(np.arccos(np.clip(st.up_z, -1, 1))))
@@ -86,6 +88,7 @@ class Metrics:
             "min_base_height_m": r(self.min_height),
             "peak_torque_ratio": r(self.peak_ratio, 2),
             "torque_saturation_pct": r(100 * self.sat / n_joint_ticks, 1),
+            "mean_servo_load": r(self.load_sum / max(self.ticks, 1), 3),
             "energy_j": r(self.energy, 2),
             "cost_of_transport": r(cot, 2),
             "tracking_rmse_rad": r(np.sqrt(self.track_sq / max(self.ticks, 1))),

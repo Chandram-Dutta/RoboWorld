@@ -1,0 +1,10 @@
+name: duck
+kind: biped
+description: >-
+  A small duck-style biped in the spirit of Open Duck Mini: 5-DoF legs (hip yaw/roll/pitch,
+  knee, ankle pitch), a 2-DoF neck with a camera, STS3215 servos, about 2 kg.
+body: {size: [0.15, 0.13, 0.11], mass: 1.1, color: white}
+legs:
+  - {name: left_leg,  mount: [-0.01,  0.06, -0.06], dof: biped5, thigh: 0.08, shin: 0.08, foot: [0.11, 0.05], knee: forward, color: gray}
+  - {name: right_leg, mount: [-0.01, -0.06, -0.06], dof: biped5, thigh: 0.08, shin: 0.08, foot: [0.11, 0.05], knee: forward, color: gray}
+head: {size: [0.11, 0.08, 0.06], mount: [0.03, 0.0, 0.055], neck: 0.06, dof: pitch_yaw, camera_look: [1.0, 0.0, -0.8], camera_fovy: 80, color: white}

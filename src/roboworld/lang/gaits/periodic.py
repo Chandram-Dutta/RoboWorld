@@ -24,7 +24,9 @@ PATTERNS = {
     "quadruped_pace": {"FL": 0.0, "RL": 0.0, "FR": 0.5, "RR": 0.5},
     "quadruped_bound": {"FL": 0.0, "FR": 0.0, "RL": 0.5, "RR": 0.5},
     "quadruped_walk": {"FL": 0.0, "RR": 0.25, "FR": 0.5, "RL": 0.75},
+    "hexapod_tripod": {"L1": 0.0, "R2": 0.0, "L3": 0.0, "R1": 0.5, "L2": 0.5, "R3": 0.5},
 }
+PATTERN_KINDS = {"hexapod_tripod": ("hexapod",)}
 
 
 class PeriodicGait(GaitController):

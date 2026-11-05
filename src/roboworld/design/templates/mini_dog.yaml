@@ -1,0 +1,12 @@
+name: mini_dog
+kind: quadruped
+description: >-
+  A small hobby-servo quadruped: 3-DoF legs (abduction, hip, knee) with backward knees and ball
+  feet, a fixed head camera, STS3215 servos, about 2 kg.
+body: {size: [0.24, 0.12, 0.07], mass: 1.0, color: white}
+legs:
+  - {name: FL, mount: [ 0.10,  0.065, -0.02], dof: quad3, thigh: 0.09, shin: 0.09, foot: [0.014], knee: backward, stance: 0.8}
+  - {name: FR, mount: [ 0.10, -0.065, -0.02], dof: quad3, thigh: 0.09, shin: 0.09, foot: [0.014], knee: backward, stance: 0.8}
+  - {name: RL, mount: [-0.10,  0.065, -0.02], dof: quad3, thigh: 0.09, shin: 0.09, foot: [0.014], knee: backward, stance: 0.8}
+  - {name: RR, mount: [-0.10, -0.065, -0.02], dof: quad3, thigh: 0.09, shin: 0.09, foot: [0.014], knee: backward, stance: 0.8}
+head: {size: [0.06, 0.07, 0.05], mount: [0.12, 0.0, 0.02], neck: 0.0, dof: fixed, camera_look: [1.0, 0.0, -0.5], camera_fovy: 80}

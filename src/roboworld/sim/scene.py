@@ -21,11 +21,13 @@ PROXY_CONTYPE, PROXY_CONAFFINITY = 4, 8
 def add_body_proxies(spec: mujoco.MjSpec) -> int:
     """Let visual meshes of bodies with no collision geometry (e.g. the duck's legs and trunk)
     collide with world objects, so robots can't walk through balls and boxes. Returns how many."""
-    colliding_bodies = {id(g.parent) for g in spec.geoms if g.contype or g.conaffinity}
+    # Compare bodies by name: MjSpec hands out fresh wrapper objects, so id()/`is` are not stable.
+    world = spec.worldbody.name
+    colliding_bodies = {g.parent.name for g in spec.geoms if g.contype or g.conaffinity}
     count = 0
     for g in spec.geoms:
-        body = g.parent
-        if body is spec.worldbody or id(body) in colliding_bodies or g.contype or g.conaffinity:
+        body = g.parent.name
+        if body == world or body in colliding_bodies or g.contype or g.conaffinity:
             continue
         if g.group != 2 or g.type != mujoco.mjtGeom.mjGEOM_MESH:
             continue

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Callable
 from roboworld.lang import schema
 from roboworld.lang.gaits.base import GaitController
 from roboworld.lang.gaits.biped import BipedWalk
-from roboworld.lang.gaits.periodic import PATTERNS, PeriodicGait
+from roboworld.lang.gaits.periodic import PATTERN_KINDS, PATTERNS, PeriodicGait
 from roboworld.lang.manifest import Manifest
 
 if TYPE_CHECKING:
@@ -21,7 +21,7 @@ GAITS: dict[str, tuple[tuple[str, ...], GaitFactory]] = {
     "biped_walk": (BipedWalk.kinds, lambda ctx, spec: BipedWalk(ctx, spec)),
 }
 for _name in PATTERNS:
-    GAITS[_name] = (("quadruped",), lambda ctx, spec, n=_name: PeriodicGait(ctx, spec, n))
+    GAITS[_name] = (PATTERN_KINDS.get(_name, ("quadruped",)), lambda ctx, spec, n=_name: PeriodicGait(ctx, spec, n))
 
 
 def available_gaits(manifest: Manifest) -> list[str]:

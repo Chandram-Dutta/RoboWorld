@@ -1,0 +1,8 @@
+# Hobby / small-robot servos (approximate datasheet values; tune with your own measurements).
+# torque_nm: usable stall torque; speed_rad_s: no-load speed; kp/damping/armature/frictionloss:
+# simulation parameters for a position servo; mass_kg: servo + typical bracket.
+sts3215:  {torque_nm: 3.0, speed_rad_s: 5.2, kp: 17.8, damping: 0.60, armature: 0.028, frictionloss: 0.052, mass_kg: 0.065, note: "Feetech 12 V, used in Open Duck Mini and SO-101"}
+sts3250:  {torque_nm: 5.0, speed_rad_s: 4.0, kp: 30.0, damping: 0.80, armature: 0.040, frictionloss: 0.070, mass_kg: 0.080, note: "Feetech high-torque"}
+xl330:    {torque_nm: 0.6, speed_rad_s: 9.6, kp: 6.0,  damping: 0.10, armature: 0.006, frictionloss: 0.010, mass_kg: 0.022, note: "Dynamixel, light and fast"}
+xm430:    {torque_nm: 4.1, speed_rad_s: 4.8, kp: 25.0, damping: 0.70, armature: 0.035, frictionloss: 0.060, mass_kg: 0.095, note: "Dynamixel mid-size"}
+mg996r:   {torque_nm: 1.0, speed_rad_s: 7.0, kp: 10.0, damping: 0.30, armature: 0.015, frictionloss: 0.050, mass_kg: 0.060, note: "cheap analog metal-gear"}

@@ -105,6 +105,85 @@ def list_tasks() -> str:
                    "world": t.world if isinstance(t.world, str) else t.world.name} for t in _tasks()])
 
 
+# ------------------------------------------------------------------ design tools
+@server.tool()
+def design_templates() -> str:
+    """Robot templates to start a design from (duck biped, mini dog, hexapod), and the servo catalog."""
+    from roboworld.design import api as design
+
+    return _json({"templates": design.templates(), "servos": design.servos()})
+
+
+def _design_result(out: dict[str, Any]) -> list[Any]:
+    result: list[Any] = [_json(out)]
+    try:
+        result.append(Image(data=png_bytes(api.snapshot(out["name"])), format="png"))
+    except Exception:  # noqa: BLE001 - the picture is a bonus
+        pass
+    return result
+
+
+@server.tool(structured_output=False)
+def design_robot(name: str, template: str, changes: str = "", note: str = "") -> list[Any]:
+    """Create a new robot from a template plus changes (YAML), compile it and run its checks.
+
+    Changes can use dotted keys and per-leg edits, e.g.
+    {"body.mass": 1.4, "all_legs": {"thigh": 0.1, "dof": "biped6"}, "legs": {"left_leg": {"foot": [0.12, 0.06]}}}.
+    The robot then works with every gait, skill, task and the benchmark."""
+    from roboworld.design import api as design
+
+    return _design_result(design.new(name, template, changes, note=note))
+
+
+@server.tool(structured_output=False)
+def derive_robot(parent: str, name: str, changes: str, note: str = "") -> list[Any]:
+    """Make a child design of an existing design with some changes (history keeps the link), and check it."""
+    from roboworld.design import api as design
+
+    return _design_result(design.derive(parent, name, changes, note=note))
+
+
+@server.tool()
+def check_design(name: str) -> str:
+    """Physical and walking checks for a robot: mass, joint ranges, overlapping parts, standing torque and sag,
+    walking, straightness, turning. Each check says pass/warn/fail and why."""
+    from roboworld.design import api as design
+
+    return _json(design.check(name))
+
+
+@server.tool()
+def list_designs() -> str:
+    """All robot designs with their parent, last check result and note."""
+    from roboworld.design import api as design
+
+    return _json(design.designs())
+
+
+@server.tool()
+def design_history(name: str) -> str:
+    """A design and its ancestors, newest first."""
+    from roboworld.design import api as design
+
+    return _json(design.history(name))
+
+
+@server.tool()
+def tune_design(name: str, course: str = "flat", trials: int = 24) -> str:
+    """Search the design's gait settings on a course ('flat' or 'bumpy') and save the best as a child design."""
+    from roboworld.design import api as design
+
+    return _json(design.tune(name, course=course, trials=trials))
+
+
+@server.tool()
+def compare_designs(robots: list[str], tasks: str = "all", seeds: int = 2, brain: str = "baseline") -> str:
+    """Run the same brain on several robots across tasks and seeds; differences come from the bodies."""
+    from roboworld.design import api as design
+
+    return _json(design.compare(robots, tasks, seeds=seeds, brain=brain))
+
+
 @server.tool()
 def list_runs(limit: int = 10) -> str:
     """Most recent simulation runs."""

@@ -24,6 +24,6 @@ HOME = Path(os.environ.get("ROBOWORLD_HOME", _default_home())).resolve()
 ASSETS_DIR = HOME / "assets"
 ROBOT_ASSETS_DIR = ASSETS_DIR / "robots"
 RUNS_DIR = Path(os.environ.get("ROBOWORLD_RUNS_DIR", HOME / "runs")).resolve()
-LIBRARY_DIR = HOME / "library"
+LIBRARY_DIR = Path(os.environ.get("ROBOWORLD_LIBRARY_DIR", HOME / "library")).resolve()
 CACHE_DIR = HOME / ".cache"
 MANIFEST_DIR = PACKAGE_DIR / "robots" / "manifests"

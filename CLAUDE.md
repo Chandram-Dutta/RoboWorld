@@ -51,6 +51,14 @@
   - When a harness does badly, improve the platform side (skills, perception,
     tasks, metrics).
   - Old `run(session, …)` brains still work through `registry.as_brain`.
+- **Robot design:**
+  - Designs live in `library/designs/<name>/`, with registry entries in
+    `library/robots/` (gitignored, user content).
+  - Generated robots follow `compiler.py`'s naming: `<leg>_<part>` joints,
+    `<leg>_foot` sites, `head_cam`, and `neck_pitch` / `head_yaw` aliased to
+    `head.pitch` / `head.yaw`.
+  - Checks must test at the speeds skills really use (85% of the gait limits).
+  - Subprocesses get the library through `ROBOWORLD_LIBRARY_DIR`.
 - **Collision bits:**
   - World geoms use contype 9 / conaffinity 5.
   - Robot "body proxies" (visual meshes of bodies with no collision geometry) use

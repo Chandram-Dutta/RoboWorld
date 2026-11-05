@@ -1,4 +1,4 @@
-# The Phase 1 demo: walk the duck forward 1 m while nodding, then look around.
+# Walk the duck forward 1 m while nodding, then look around.
 robot: open_duck_mini_v2
 name: walk 1 m and nod
 do:

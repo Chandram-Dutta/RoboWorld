@@ -231,7 +231,7 @@ harness_app = typer.Typer(help="Build and check your own harness (the brain's co
                           no_args_is_help=True)
 app.add_typer(harness_app, name="harness")
 
-HARNESS_TEMPLATE = '''"""{name}: a RoboWorld harness. Edit run(); see docs/harness-sdk.md.
+HARNESS_TEMPLATE = '''"""{name}: a RoboWorld harness. Edit run(); see "Building a harness" in the docs.
 
 Run it:   uv run rw harness check {spec}
 Bench it: uv run rw bench --brains baseline,{spec}
@@ -325,6 +325,134 @@ def harness_check(
     _print(runner.episode_summary(result))
     typer.echo("\n" + ("OK: harness ran cleanly" if not problems else "issues:\n- " + "\n- ".join(problems)))
     raise typer.Exit(0 if not problems or problems == ["claimed success but the simulator disagrees"] else 1)
+
+
+design_app = typer.Typer(help="Design robots: templates, changes, checks, history, tuning, comparisons.",
+                         no_args_is_help=True)
+app.add_typer(design_app, name="design")
+
+
+def _sets(pairs: list[str] | None, changes: str | None) -> dict:
+    import yaml
+
+    out = yaml.safe_load(changes) if changes else {}
+    for pair in pairs or []:
+        key, _, value = pair.partition("=")
+        if not key or not _:
+            raise typer.BadParameter(f"--set expects key=value, got '{pair}'")
+        out[key.strip()] = yaml.safe_load(value)
+    return out
+
+
+def _check_lines(report: dict) -> None:
+    typer.echo(f"\ncheck: {report['summary']}")
+    for c in report["checks"]:
+        typer.echo(f"  {c['status']:<4} {c['check']:<18} {c['detail']}")
+
+
+@design_app.command("templates")
+def design_templates() -> None:
+    """Starting points for new robots."""
+    from roboworld.design import api
+
+    for name, about in api.templates().items():
+        typer.echo(f"{name:<10} {' '.join(about.split())}")
+
+
+@design_app.command("servos")
+def design_servos() -> None:
+    """The servo catalog."""
+    from roboworld.design import api
+
+    for name, s in api.servos().items():
+        typer.echo(f"{name:<8} {s['torque_nm']:>4} N·m  {s['speed_rad_s']:>4} rad/s  {s['mass_kg'] * 1000:>3.0f} g  {s['note']}")
+
+
+@design_app.command("new")
+def design_new(name: str, template: str = typer.Option(..., help="see `rw design templates`"),
+               set_: Optional[list[str]] = typer.Option(None, "--set", help="change, e.g. all_legs.thigh=0.1"),
+               changes: Optional[str] = typer.Option(None, help="YAML mapping of changes"),
+               note: str = "", check: bool = True) -> None:
+    """Create a robot from a template (plus optional changes), compile it and check it."""
+    from roboworld.design import api
+
+    out = api.new(name, template, _sets(set_, changes), note=note, check=check)
+    typer.echo(f"created {out['name']} (digest {out['digest']})")
+    if check:
+        _check_lines(out["check"])
+
+
+@design_app.command("derive")
+def design_derive(parent: str, name: str,
+                  set_: Optional[list[str]] = typer.Option(None, "--set", help="change, e.g. body.mass=1.4"),
+                  changes: Optional[str] = typer.Option(None, help="YAML mapping of changes"),
+                  note: str = "", check: bool = True) -> None:
+    """Make a child design with some changes; history keeps the link to its parent."""
+    from roboworld.design import api
+
+    out = api.derive(parent, name, _sets(set_, changes), note=note, check=check)
+    typer.echo(f"created {out['name']} from {parent}")
+    if check:
+        _check_lines(out["check"])
+
+
+@design_app.command("check")
+def design_check(name: str) -> None:
+    """Re-run the physical and walking checks on a design (or any robot)."""
+    from roboworld.design import api
+
+    _check_lines(api.check(name))
+
+
+@design_app.command("show")
+def design_show(name: str) -> None:
+    """Print a design's spec and history info."""
+    from roboworld.design import api
+
+    _print(api.show(name))
+
+
+@design_app.command("list")
+def design_list() -> None:
+    """All designs."""
+    from roboworld.design import api
+
+    for d in api.designs():
+        typer.echo(f"{d['name']:<22} parent={d['parent'] or '-':<18} {d['check'] or 'unchecked':<12} {d['note'] or ''}")
+
+
+@design_app.command("history")
+def design_history(name: str) -> None:
+    """A design and its ancestors."""
+    from roboworld.design import api
+
+    for h in api.history(name):
+        typer.echo(f"{h['name']:<22} {h['created']}  {h['check'] or 'unchecked':<12} {h['note'] or ''}")
+
+
+@design_app.command("tune")
+def design_tune(name: str, course: str = typer.Option("flat", help="flat | bumpy"), trials: int = 24,
+                as_: Optional[str] = typer.Option(None, "--as", help="name for the tuned child design")) -> None:
+    """Search the design's gait settings on a course; save the best as a child design."""
+    from roboworld.design import api
+
+    out = api.tune(name, course=course, trials=trials, new_name=as_)
+    typer.echo(f"{course}: {out['baseline_score_m']} m -> {out['best_score_m']} m over {out['trials']} trials")
+    typer.echo(f"best: {out['best']}")
+    typer.echo(f"saved as: {out.get('saved_as') or '(no improvement, nothing saved)'}")
+
+
+@design_app.command("compare")
+def design_compare(robots: list[str], tasks: str = typer.Option("all", help="comma-separated tasks or all"),
+                   seeds: int = 2, brain: str = typer.Option("baseline", help="the same brain drives every robot"),
+                   jobs: int = 3) -> None:
+    """Run the same brain on several robots across tasks: differences come from the bodies."""
+    from roboworld.design import api
+
+    out = api.compare(list(robots), tasks, seeds=seeds, brain=brain, parallel=jobs)
+    for robot, r in sorted(out["robots"].items(), key=lambda kv: -kv[1]["success_rate"]):
+        typer.echo(f"{robot:<22} {r['successes']}/{r['episodes']} ({100 * r['success_rate']:.0f}%)  {r['tasks']}")
+    typer.echo(f"\nreport: {out['report']}")
 
 
 @app.command("robot-config")

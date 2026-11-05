@@ -15,7 +15,7 @@ test bench. Your harness subclasses ``Harness`` and drives the robot through
             await robot.finish("walked to the ball", success=result.get("ok"))
 
 Scaffold one with ``rw harness new``, check it with ``rw harness check`` and
-compare it with ``rw bench``. See docs/harness-sdk.md.
+compare it with ``rw bench``. See "Building a harness" in the docs.
 """
 
 from roboworld.harness.adapter import HarnessBrain, connect_and_run

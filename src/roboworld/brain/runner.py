@@ -75,7 +75,8 @@ def run_episode(*args: Any, **kwargs: Any) -> dict[str, Any]:
 
 def server_env() -> dict[str, str]:
     """Environment for the robot server process (results go to this process's runs dir)."""
-    return {**os.environ, "ROBOWORLD_RUNS_DIR": str(paths.RUNS_DIR), "ROBOWORLD_HOME": str(paths.HOME)}
+    return {**os.environ, "ROBOWORLD_RUNS_DIR": str(paths.RUNS_DIR), "ROBOWORLD_HOME": str(paths.HOME),
+            "ROBOWORLD_LIBRARY_DIR": str(paths.LIBRARY_DIR)}
 
 
 def mcp_config(robot: str, task: str, mode: str, seed: int, run_id: str, brain: str,
@@ -85,7 +86,8 @@ def mcp_config(robot: str, task: str, mode: str, seed: int, run_id: str, brain: 
                                      "args": server_args(robot, task, mode, seed, run_id, brain, record),
                                      "cwd": str(paths.HOME),
                                      "env": {"ROBOWORLD_RUNS_DIR": str(paths.RUNS_DIR),
-                                             "ROBOWORLD_HOME": str(paths.HOME)}}}}
+                                             "ROBOWORLD_HOME": str(paths.HOME),
+                                             "ROBOWORLD_LIBRARY_DIR": str(paths.LIBRARY_DIR)}}}}
 
 
 def codex_flags(cfg: dict[str, Any], name: str = "robot") -> str:

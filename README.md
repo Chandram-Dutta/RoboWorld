@@ -9,10 +9,11 @@ Think "a suite for making microducks", in many shapes for many tasks. RoboWorld
 doesn't ship LLM harnesses; it gives you the robot, the worlds and the test bench
 to build and compare yours.
 
-Everything runs on a laptop CPU, including an 8 GB M2 Mac. Robots move without any
-GPU training: RoboLang compiles to inverse kinematics, gait generators and balance
-control. Trained RL policies are an optional upgrade that plugs into the same
-interface.
+Everything runs on a laptop CPU. Robots move without any GPU training: RoboLang
+compiles to inverse kinematics, gait generators and balance control. Trained RL
+policies are an optional upgrade that plugs into the same interface.
+
+**Documentation:** https://chandram-dutta.github.io/RoboWorld/ (source in [`docs/`](docs/)).
 
 ```
 builder:  Claude Code / Desktop ──MCP──► rw serve-mcp ──► RoboLang ──► MuJoCo ──► Rerun recording
@@ -185,13 +186,63 @@ src/roboworld/
   robots/    registry.py + manifests/*.yaml
   mcp/       server.py (builder), robot_server.py (the robot as an MCP server)
   harness/   core.py (Harness, Robot, TaskInfo), adapter.py (runner/bench glue, connect_and_run)
+  design/    spec.py (RoboSpec), compiler.py, checks.py, tune.py, store.py (history), api.py, templates/, servos.yaml
   brain/     brains.py, baseline.py (rule-based harness), registry.py (specs, entry points), runner.py
   episode.py, bench.py, api.py, cli.py, store.py
-docs/harness-sdk.md
+docs/        documentation site (Astro Starlight): cd docs && npm install && npm run dev
 examples/harnesses/  example harnesses (rule-based, short LLM loop);  examples/brains/  scripted brains
 examples/    runnable programs
 tests/       uv run pytest
 ```
+
+## Design robots
+
+Robots are described in a few numbers (a **RoboSpec**):
+- body size and mass
+- legs: `biped5`, `biped6` with ankle roll, or `quad3`, with lengths, feet, knee
+  direction and stance
+- servos from a catalog
+- a head with a camera
+
+A spec compiles into a MuJoCo model plus a manifest, so a designed robot
+immediately works with every gait, skill, task, robot server and benchmark. You,
+or the LLM you design with, decide the changes. RoboWorld compiles, checks,
+records history and compares.
+
+```bash
+uv run rw design templates                     # duck (biped), mini_dog (quadruped), hexapod
+uv run rw design new duck1 --template duck
+uv run rw design derive duck1 duck2 --set all_legs.dof=biped6 --set "all_legs.foot=[0.13, 0.07]" \
+    --note "ankle roll + bigger feet"
+uv run rw design tune duck2 --course bumpy --as duck3     # gait search on a course, saved as a child
+uv run rw design history duck3                             # duck3 <- duck2 <- duck1, with notes and check results
+uv run rw design compare open_duck_mini_v2 duck1 duck3 dog1 --tasks cross_bumpy_ground,find_red_ball --seeds 3
+```
+
+**Checks**, each with pass/warn/fail and the reason:
+- mass and standing height
+- joint ranges at the standing pose
+- overlapping parts
+- whether it stands, standing torque headroom, and sag
+- walking and turning at the speeds skills actually use
+- walking straightness
+
+**`compare`** drives every robot with the same brain on the same seeds, so the
+differences come from the bodies. The same tools are on the builder MCP server:
+`design_templates`, `design_robot`, `derive_robot`, `check_design`,
+`tune_design`, `compare_designs`, `design_history`, `list_designs`.
+
+What the first comparison showed (baseline brain, 3 seeds per task):
+
+| robot | bumpy ground | find ball | push ball |
+|---|---|---|---|
+| `duck1` (template) | 0/3 | 3/3 | 3/3 |
+| `open_duck_mini_v2` | 0/3 | 3/3 | 1/3 |
+| `dog1` (mini_dog template) | 1/3 | 2/3 | 1/3 |
+| `duck3` (ankle roll, bigger feet, gait tuned for bumps) | 0/3 | 3/3 | 1/3 |
+
+Tuning for bumps didn't carry over to a task that needs steering, and it cost
+pushing. That's the kind of trade-off the comparison is there to show.
 
 ## Benchmark: robots × brains × tasks
 
@@ -247,7 +298,7 @@ A harness is the control loop around a robot brain. It decides what the model se
 when the model is asked, how tool calls run, and when to stop. **You write the
 harness and call whatever model you like**; RoboWorld gives you the interface, the
 plug-in points and the test bench. The full guide is
-[docs/harness-sdk.md](docs/harness-sdk.md).
+"Building a harness" in the documentation site (`docs/`).
 
 ```bash
 uv run rw harness new my_harness                  # scaffold: harnesses/my_harness.py + .yaml
@@ -296,7 +347,9 @@ class MyHarness(Harness):
   it has seen.
   - If an object is pinned against a wall, `push` says so instead of trying.
 - Physics findings, not bugs:
-  - The duck (no ankle roll, soft servos) falls on 1–1.5 cm bumps.
+  - Small bipeds (the Open Duck model and the designed ducks) mostly fall on
+    1–1.5 cm bumps. Adding ankle roll, bigger feet and a tuned gait raised
+    straight-line crossings from 0/4 to 1/4, not to reliable.
   - The duck trips when shoving a box.
   - Go2 pushes boxes about half the time; they slide off-line.
 
@@ -311,8 +364,9 @@ Each phase ends with a demo:
 4. Bring-your-own-harness: the `Harness`/`Robot` interface, plug-in points (specs,
    entry points, standalone), `rw harness new/check`, and harness-reported metrics
    in the benchmark (done).
-5. Prompt-to-robot design: RoboSpec templates compiled through MjSpec, a servo
-   catalog, checks, version history, and Optuna. The benchmark judges the designs.
+5. Robot design: RoboSpec templates (duck, mini dog, hexapod) compiled with MjSpec,
+   a servo catalog, checks, design history, gait tuning on courses, and
+   same-brain comparisons, in the CLI and the builder MCP server (done).
 6. Web app with the `@mujoco/mujoco` WASM viewer.
 7. Optional:
    - GPU RL policy stabilizer

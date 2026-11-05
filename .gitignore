@@ -10,3 +10,7 @@ runs/
 .cache/
 # Robot models are downloaded with `rw fetch` (pinned commits), not vendored.
 assets/robots/
+
+# Robot designs are user content (rw design ...)
+library/designs/
+library/robots/
